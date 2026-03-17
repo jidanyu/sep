@@ -1,0 +1,1040 @@
+:root {
+  color-scheme: dark;
+  --bg: #0a0d0f;
+  --bg-elevated: rgba(15, 19, 21, 0.78);
+  --bg-panel: rgba(11, 14, 16, 0.86);
+  --line: rgba(235, 239, 240, 0.07);
+  --line-strong: rgba(235, 239, 240, 0.14);
+  --text: #f3f2ec;
+  --muted: #8f9794;
+  --accent: #c8b07d;
+  --accent-2: #9eb6ab;
+  --system: #747d7a;
+  --user: #c8b07d;
+  --assistant: #9eb6ab;
+  --tool: #95a9bf;
+  --field-bg: rgba(18, 22, 24, 0.92);
+  --field-bg-soft: rgba(255, 255, 255, 0.03);
+  --field-border-focus: rgba(235, 239, 240, 0.18);
+  --field-arrow: #8f9794;
+  --composer-shadow: 0 -18px 36px rgba(0, 0, 0, 0.16);
+  --composer-card-shadow: 0 20px 54px rgba(0, 0, 0, 0.18);
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+  background:
+    radial-gradient(circle at top left, rgba(158, 182, 171, 0.06), transparent 24%),
+    radial-gradient(circle at top right, rgba(200, 176, 125, 0.05), transparent 28%),
+    linear-gradient(180deg, #0d1012 0%, #090b0c 100%);
+  color: var(--text);
+}
+
+:root[data-theme='rust-light'] {
+  color-scheme: light;
+  --bg: #f4ecd8;
+  --bg-elevated: rgba(255, 249, 238, 0.88);
+  --bg-panel: rgba(248, 239, 220, 0.92);
+  --line: rgba(120, 82, 43, 0.12);
+  --line-strong: rgba(120, 82, 43, 0.2);
+  --text: #3d2d1f;
+  --muted: #8f735c;
+  --accent: #b86c3a;
+  --accent-2: #9e7b45;
+  --system: #8d7767;
+  --user: #b86c3a;
+  --assistant: #9e7b45;
+  --tool: #7e8d9c;
+  --field-bg: rgba(255, 250, 241, 0.96);
+  --field-bg-soft: rgba(184, 108, 58, 0.06);
+  --field-border-focus: rgba(120, 82, 43, 0.24);
+  --field-arrow: #8f735c;
+  --composer-shadow: 0 -18px 30px rgba(139, 97, 51, 0.08);
+  --composer-card-shadow: 0 18px 42px rgba(139, 97, 51, 0.14);
+  background:
+    radial-gradient(circle at top left, rgba(184, 108, 58, 0.08), transparent 24%),
+    radial-gradient(circle at top right, rgba(158, 123, 69, 0.08), transparent 28%),
+    linear-gradient(180deg, #f8efdc 0%, #f2e8d2 100%);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  height: 100vh;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+button,
+textarea,
+input {
+  font: inherit;
+}
+
+select {
+  font: inherit;
+}
+
+button {
+  border: 0;
+  cursor: pointer;
+}
+
+.app-shell {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 10px;
+  height: 100vh;
+  padding: 10px;
+  overflow: hidden;
+}
+
+.workspace-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 14px;
+  min-height: 0;
+}
+
+.sidebar-top {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sidebar-primary {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line-strong);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--text);
+  text-align: left;
+}
+
+.session-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--bg-elevated);
+  padding: 12px;
+}
+
+.session-card p {
+  margin-top: 6px;
+  color: var(--muted);
+}
+
+.sidebar-bottom {
+  margin-top: auto;
+}
+
+.panel {
+  border: 1px solid var(--line);
+  background: var(--bg-panel);
+  backdrop-filter: blur(12px);
+  border-radius: 14px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.16);
+  min-height: 0;
+}
+
+.settings-launcher {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--text);
+}
+
+.header-settings-launcher {
+  min-width: 126px;
+}
+
+.settings-launcher small {
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.hidden-panel {
+  display: none;
+}
+
+.center-stage {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.composer,
+.transcript {
+  padding-left: 18px;
+  padding-right: 18px;
+}
+
+.composer > *,
+.transcript > * {
+  max-width: 760px;
+  margin-left: auto;
+  margin-right: auto;
+  width: 100%;
+}
+
+.settings-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(6, 8, 9, 0.42);
+  backdrop-filter: blur(6px);
+  z-index: 20;
+}
+
+.settings-modal {
+  width: min(1100px, 100%);
+  height: min(760px, calc(100vh - 40px));
+  padding: 16px;
+  overflow: auto;
+}
+
+.settings-modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.settings-layout {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 18px;
+  min-height: 0;
+}
+
+.settings-sidebar {
+  border-right: 1px solid var(--line);
+  padding-right: 18px;
+}
+
+.settings-content {
+  min-width: 0;
+}
+
+.settings-nav-item {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-align: left;
+  padding: 12px 13px;
+  border-radius: 12px;
+  border: 1px solid var(--line-strong);
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--text);
+}
+
+.settings-nav-item + .settings-nav-item {
+  margin-top: 8px;
+}
+
+.settings-nav-item.active {
+  border-color: rgba(200, 176, 125, 0.24);
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.settings-nav-item span {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.profile-card,
+.detail-card,
+.stat-card,
+.provider-card,
+.toggle-card,
+.transcript-card {
+  border: 1px solid var(--line);
+  background: var(--bg-elevated);
+  transition: border-color 140ms ease, transform 140ms ease, background-color 140ms ease;
+}
+
+.provider-card,
+.toggle-card {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  text-align: left;
+  border-radius: 12px;
+  padding: 11px 12px;
+}
+
+.provider-card:hover,
+.toggle-card:hover,
+.transcript-card:hover {
+  border-color: var(--line-strong);
+}
+
+.provider-card.active {
+  border-color: rgba(200, 176, 125, 0.2);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.provider-card p,
+.toggle-card p,
+.detail-card p,
+.profile-card p,
+.transcript-card p,
+.muted {
+  color: var(--muted);
+}
+
+.provider-list,
+.toggle-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.provider-row,
+.section-head,
+.composer-row,
+.transcript-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.provider-row-stack {
+  align-items: flex-start;
+}
+
+.provider-badges {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+
+.badge.live {
+  border-color: rgba(108, 181, 160, 0.36);
+  color: var(--accent-2);
+  background: rgba(108, 181, 160, 0.08);
+}
+
+.badge.idle {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.section-head {
+  margin-bottom: 12px;
+}
+
+.section-head span,
+.eyebrow,
+.transcript-meta,
+.toggle-card small {
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 12px;
+}
+
+h1,
+h2,
+h3,
+p {
+  margin: 0;
+}
+
+h1 {
+  margin-top: 4px;
+  margin-bottom: 8px;
+  font-size: 28px;
+  font-weight: 500;
+}
+
+.title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.locale-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.locale-toggle span {
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+h2 {
+  font-size: 19px;
+  font-weight: 500;
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.stat-card,
+.detail-card,
+.profile-card {
+  border-radius: 12px;
+  padding: 12px;
+}
+
+.stat-card strong {
+  display: block;
+  margin-top: 8px;
+  font-size: 22px;
+}
+
+.transcript {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  overflow: auto;
+  padding-top: 24px;
+  padding-bottom: 24px;
+  min-height: 0;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.transcript::-webkit-scrollbar {
+  display: none;
+}
+
+.chat-row {
+  display: flex;
+  width: 100%;
+}
+
+.chat-row.user {
+  justify-content: flex-end;
+}
+
+.chat-row.assistant,
+.chat-row.system,
+.chat-row.tool {
+  justify-content: flex-start;
+}
+
+.chat-bubble {
+  width: min(100%, 620px);
+  position: relative;
+  padding: 2px 0;
+}
+
+.chat-bubble.system {
+  color: var(--system);
+}
+
+.chat-bubble.user {
+  color: var(--text);
+  padding-bottom: 16px;
+}
+
+.chat-bubble.assistant {
+  color: var(--text);
+  padding-bottom: 16px;
+}
+
+.chat-bubble.tool {
+  color: var(--tool);
+}
+
+.chat-bubble h3 {
+  margin-top: 4px;
+  margin-bottom: 4px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.chat-bubble p {
+  white-space: pre-wrap;
+  line-height: 1.65;
+}
+
+.chat-hover-time {
+  position: absolute;
+  bottom: 0;
+  font-size: 11px;
+  line-height: 1;
+  color: var(--muted);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+
+.chat-bubble.assistant .chat-hover-time {
+  left: 0;
+}
+
+.chat-bubble.user .chat-hover-time {
+  right: 0;
+}
+
+.chat-bubble:hover .chat-hover-time {
+  opacity: 1;
+}
+
+.chat-row.user .chat-bubble {
+  text-align: right;
+}
+
+.chat-row.user .transcript-meta {
+  justify-content: flex-end;
+}
+
+.composer {
+  padding-top: 0;
+  padding-bottom: 14px;
+}
+
+.composer > * {
+  max-width: 760px;
+  margin-left: auto;
+  margin-right: auto;
+  width: 100%;
+}
+
+.composer-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 0;
+}
+
+.composer-main {
+  position: relative;
+  border-radius: 18px;
+  border: 1px solid color-mix(in srgb, var(--line-strong) 88%, transparent);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--accent) 4%, transparent), transparent 24%),
+    color-mix(in srgb, var(--field-bg) 95%, transparent);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, white 6%, transparent),
+    0 10px 30px rgba(0, 0, 0, 0.08);
+  transition: border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
+}
+
+.composer-main:focus-within {
+  border-color: color-mix(in srgb, var(--accent) 36%, var(--line-strong));
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, white 8%, transparent),
+    0 0 0 4px color-mix(in srgb, var(--accent) 10%, transparent),
+    0 14px 36px rgba(0, 0, 0, 0.12);
+}
+
+.composer textarea {
+  width: 100%;
+  min-height: 78px;
+  max-height: 148px;
+  border-radius: 18px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  resize: vertical;
+  padding: 14px 14px 88px;
+  outline: none;
+  line-height: 1.55;
+  letter-spacing: 0.01em;
+}
+
+.composer textarea::placeholder {
+  color: color-mix(in srgb, var(--muted) 88%, transparent);
+}
+
+.composer textarea:focus {
+  box-shadow: none;
+}
+
+.composer-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  width: 100%;
+  max-width: 100%;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, white 3%, transparent), transparent),
+    color-mix(in srgb, var(--bg-elevated) 82%, transparent);
+  flex-wrap: wrap;
+}
+
+.composer-toolbar-inline {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.composer-toolbar-standalone {
+  align-self: flex-start;
+}
+
+.composer-inline-badge {
+  align-self: center;
+}
+
+.composer-provider-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 4px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--field-bg-soft) 72%, transparent);
+}
+
+.narrow-picker .composer-select {
+  min-width: 92px;
+  max-width: 108px;
+}
+
+.composer-provider-picker span,
+.composer-model-indicator {
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.composer-select {
+  min-width: 124px;
+  max-width: 220px;
+  appearance: none;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background-image:
+    linear-gradient(180deg, color-mix(in srgb, var(--accent) 10%, transparent), color-mix(in srgb, var(--accent-2) 5%, transparent)),
+    linear-gradient(45deg, transparent 50%, var(--field-arrow) 50%),
+    linear-gradient(135deg, var(--field-arrow) 50%, transparent 50%);
+  background-position:
+    0 0,
+    calc(100% - 18px) calc(50% - 1px),
+    calc(100% - 12px) calc(50% - 1px);
+  background-size:
+    auto,
+    6px 6px,
+    6px 6px;
+  background-repeat: no-repeat;
+  background-color: var(--field-bg-soft);
+  color: var(--text);
+  padding: 9px 30px 9px 12px;
+  outline: none;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, white 4%, transparent);
+  font-size: 12px;
+  line-height: 1.2;
+  transition: border-color 140ms ease, background-color 140ms ease, transform 140ms ease;
+}
+
+.composer-select:focus,
+.text-input:focus,
+.locale-toggle:has(input:focus) {
+  border-color: var(--field-border-focus);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.composer-select option,
+.text-input option {
+  background: var(--field-bg);
+  color: var(--text);
+}
+
+.composer-model-indicator {
+  padding: 5px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--field-bg-soft) 85%, transparent);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 40%;
+}
+
+.composer-row {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 14px;
+}
+
+.composer-row-inline {
+  justify-content: flex-start;
+  min-height: 20px;
+}
+
+.composer-hint {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.composer-submit {
+  min-width: 88px;
+  padding: 11px 18px;
+  border-radius: 999px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, white 10%, transparent), transparent),
+    linear-gradient(135deg, color-mix(in srgb, var(--accent) 58%, transparent), color-mix(in srgb, var(--accent-2) 54%, transparent));
+  color: var(--text);
+  border: 1px solid color-mix(in srgb, var(--accent) 38%, var(--line-strong));
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, white 10%, transparent),
+    0 10px 24px color-mix(in srgb, var(--accent) 16%, transparent);
+  transition: transform 140ms ease, border-color 140ms ease, background-color 140ms ease, box-shadow 140ms ease;
+}
+
+.composer-submit:hover {
+  border-color: var(--field-border-focus);
+  transform: translateY(-1px);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, white 12%, transparent),
+    0 14px 28px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+.composer-submit:active {
+  transform: translateY(0);
+}
+
+.composer-main-footer {
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  bottom: 14px;
+  display: block;
+}
+
+.composer-main-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.settings-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.settings-card {
+  border: 1px solid var(--line);
+  background: var(--bg-elevated);
+  border-radius: 12px;
+  padding: 12px;
+}
+
+.section-head.compact {
+  margin-bottom: 10px;
+}
+
+.field-label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.field-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.field-label span,
+.helper-text {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.text-input {
+  width: 100%;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, white 3%, transparent), transparent),
+    var(--field-bg);
+  color: var(--text);
+  padding: 10px 12px;
+  outline: none;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, white 4%, transparent);
+  transition: border-color 140ms ease, box-shadow 140ms ease, background-color 140ms ease;
+}
+
+.themed-select {
+  appearance: none;
+  background-image:
+    linear-gradient(180deg, color-mix(in srgb, var(--accent) 6%, transparent), color-mix(in srgb, var(--accent-2) 3%, transparent)),
+    linear-gradient(45deg, transparent 50%, var(--field-arrow) 50%),
+    linear-gradient(135deg, var(--field-arrow) 50%, transparent 50%);
+  background-position:
+    0 0,
+    calc(100% - 18px) calc(50% - 1px),
+    calc(100% - 12px) calc(50% - 1px);
+  background-size:
+    auto,
+    6px 6px,
+    6px 6px;
+  background-repeat: no-repeat;
+  background-color: var(--field-bg);
+  padding-right: 34px;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, white 4%, transparent);
+}
+
+.theme-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.theme-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  text-align: left;
+  padding: 14px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--bg-elevated);
+  color: var(--text);
+}
+
+.theme-card span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.theme-card.active {
+  border-color: var(--line-strong);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.config-editor {
+  width: 100%;
+  min-height: 360px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: rgba(9, 12, 14, 0.84);
+  color: var(--text);
+  font: 12px/1.6 "IBM Plex Mono", "Consolas", monospace;
+  padding: 12px;
+  resize: vertical;
+  outline: none;
+}
+
+.config-editor:focus {
+  border-color: var(--field-border-focus);
+}
+
+.limit-card {
+  display: flex;
+  align-items: center;
+  min-height: 42px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--field-bg);
+  color: var(--text);
+  padding: 9px 10px;
+}
+
+.text-input:focus {
+  border-color: var(--field-border-focus);
+}
+
+.settings-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.openai-config-actions {
+  justify-content: flex-start;
+}
+
+.settings-actions.top-gap {
+  margin-top: 4px;
+}
+
+.settings-intro {
+  margin-bottom: 12px;
+}
+
+.inline-value {
+  text-align: right;
+}
+
+.inline-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+}
+
+.secondary-button {
+  padding: 8px 12px;
+  border-radius: 999px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, white 3%, transparent), transparent),
+    rgba(255, 255, 255, 0.03);
+  color: var(--text);
+  border: 1px solid var(--line);
+  transition: border-color 140ms ease, transform 140ms ease, background-color 140ms ease;
+}
+
+.secondary-button:hover {
+  border-color: var(--line-strong);
+  transform: translateY(-1px);
+}
+
+.secondary-button.danger {
+  border-color: rgba(211, 168, 95, 0.32);
+  color: var(--accent);
+}
+
+input[type='checkbox'] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent-2);
+  flex: 0 0 auto;
+}
+
+@media (max-width: 1180px) {
+  .app-shell {
+    grid-template-columns: 1fr;
+    height: auto;
+    min-height: 100vh;
+    overflow: visible;
+  }
+
+  .center-stage {
+    min-height: 70vh;
+  }
+
+  .workspace-sidebar {
+    min-height: auto;
+  }
+
+  body {
+    height: auto;
+    overflow: auto;
+  }
+}
+
+@media (max-width: 720px) {
+  .composer {
+    padding-top: 0;
+    padding-bottom: 12px;
+  }
+
+  .composer-shell {
+    padding: 0;
+  }
+
+  .composer-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .field-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .composer-toolbar {
+    width: 100%;
+    border-radius: 14px;
+  }
+
+  .composer-provider-picker {
+    justify-content: space-between;
+    width: 100%;
+  }
+
+  .composer-select,
+  .composer-model-indicator,
+  .composer-submit {
+    max-width: none;
+    width: 100%;
+  }
+
+  .composer-main-footer {
+    left: 12px;
+    right: 12px;
+    bottom: 12px;
+  }
+
+  .composer-main-meta {
+    gap: 8px;
+  }
+
+  .composer textarea {
+    min-height: 74px;
+    max-height: 144px;
+    padding: 12px 12px 132px;
+  }
+
+  .settings-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .theme-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-sidebar {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+    padding-right: 0;
+    padding-bottom: 14px;
+  }
+}
