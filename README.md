@@ -26,6 +26,7 @@
 
 - **单会话工作流**
   - 当前只聚焦一个会话窗口，不引入多会话管理复杂度。
+  - 新建会话时可直接选择任意系统目录作为会话根目录，Shell 与 Editor 工具会围绕该目录工作。
 - **多 Provider 配置界面**
   - UI 中包含 `OpenAI`、`Anthropic`、`Google`、`OpenCode Bridge` 的接入入口。
   - 支持模型选择、推理强度选择、启用/连接状态切换。
@@ -37,12 +38,13 @@
   - 展示 `system / user / assistant / tool` 消息流。
   - 保持增量更新与自动滚动。
 - **本地状态持久化**
-  - 会话状态、Provider 配置、主题和语言保存在本地存储中。
+  - 会话状态、Provider 配置、主题和语言通过本地 Rust tool 进程持久化到 SQLite。
 - **桌面端流式对话**
   - Tauri 后端已接入流式请求与事件回传。
   - 当前真正打通的 Provider 是 `OpenAI` 和 `Anthropic`。
 - **基础 Tools / MCP 展示**
   - UI 中已提供内建工具与 MCP 状态区，便于后续扩展。
+  - 当前对模型默认暴露的工具分为 `Shell`、`Editor` 和 `Web Fetch`；`Shell` 负责命令、依赖、测试、构建、搜索和 Git，`Editor` 负责直接读写和修改文件内容。
 - **OpenAI JSON 配置编辑**
   - 可直接在界面中编辑 OpenAI 风格配置 JSON，并同步模型预设。
 
@@ -59,7 +61,7 @@
 - **部分 Provider 仅完成 UI 预留**
   - `Google` 和 `OpenCode Bridge` 已有界面与配置结构，但桌面端真实请求当前未打通。
 - **本地存储为主**
-  - 当前配置主要保存在本地，适合原型开发和本地试验。
+  - 当前配置主要由本地 Rust tool 进程保存在 SQLite 中，适合原型开发和本地试验。
 - **浏览器模式能力有限**
   - 仅运行前端开发服务器时，可以查看界面，但无法完整替代桌面端能力。
 
@@ -197,6 +199,7 @@ This repository currently uses:
 
 - **Single-session workflow**
   - The current app intentionally focuses on one session only.
+  - Creating a new session lets you choose any system directory as the session root for Shell and Editor tools.
 - **Multi-provider settings UI**
   - The UI includes entries for `OpenAI`, `Anthropic`, `Google`, and `OpenCode Bridge`.
   - It supports model selection, reasoning variant selection, and enabled/connected toggles.
@@ -208,12 +211,13 @@ This repository currently uses:
   - Displays `system / user / assistant / tool` entries.
   - Uses incremental updates and auto-scroll behavior.
 - **Local persistence**
-  - Session state, provider settings, theme, and locale are stored locally.
+  - Session state, provider settings, theme, and locale are persisted to SQLite by the local Rust tool process.
 - **Desktop streaming chat**
   - The Tauri backend already supports streaming requests and event forwarding.
   - The providers currently wired end-to-end are `OpenAI` and `Anthropic`.
 - **Basic Tools / MCP presentation**
   - The UI already exposes built-in tool and MCP sections for future expansion.
+  - The model-facing toolset is split into `Shell`, `Editor`, and `Web Fetch`; `Shell` handles commands, dependencies, tests, builds, search, and git, while `Editor` handles direct file reads and edits.
 - **OpenAI JSON config editing**
   - The app can edit OpenAI-style config JSON and derive model presets from it.
 
@@ -230,7 +234,7 @@ This is a `v0.1` prototype, so some parts are intentionally incomplete:
 - **Some providers are UI placeholders for now**
   - `Google` and `OpenCode Bridge` are represented in the UI and state model, but are not fully wired in the desktop backend yet.
 - **Local storage first**
-  - Configuration is currently stored locally, which is good for prototyping and local experimentation.
+  - Configuration is currently persisted locally through the Rust tool process and SQLite, which is good for prototyping and local experimentation.
 - **Browser-only mode is limited**
   - Running only the frontend dev server is useful for UI work, but does not replace the full desktop runtime.
 
@@ -333,4 +337,3 @@ Planned next steps:
 - `v0.2`: subagents, forked sessions, resource controls, initial compaction and handoff
 - `v0.3`: external client bridge, A2A, expanded permissions, model-profile-aware routing
 - `v0.4`: workspaces, templates, observability, crash recovery, import/export
-

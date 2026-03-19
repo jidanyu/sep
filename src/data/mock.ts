@@ -3,6 +3,7 @@ import {
   ProviderConnection,
   ProviderModelPreset,
   ProviderProfile,
+  DebugRequestEntry,
   ToolDefinition,
   TranscriptEntry,
   WorkspaceState,
@@ -45,24 +46,17 @@ export const providerProfiles: ProviderProfile[] = [
 
 export const defaultTools: ToolDefinition[] = [
   {
-    id: 'terminal',
-    name: 'Terminal',
+    id: 'shell',
+    name: 'Shell',
     category: 'coding',
-    description: 'Run local commands inside the current workspace.',
+    description: 'Run commands for dependencies, tests, builds, scripts, search, and git inside the workspace.',
     enabled: true,
   },
   {
-    id: 'files',
-    name: 'Files',
+    id: 'editor',
+    name: 'Editor',
     category: 'filesystem',
-    description: 'Read and patch files with approval-friendly boundaries.',
-    enabled: true,
-  },
-  {
-    id: 'search',
-    name: 'Search',
-    category: 'search',
-    description: 'Fast symbol, text, and tool discovery across codebases.',
+    description: 'Read, write, and patch file content directly when shell is not the right fit.',
     enabled: true,
   },
   {
@@ -184,10 +178,14 @@ export const defaultTranscript: TranscriptEntry[] = [
   },
 ];
 
+export const defaultDebugRequests: DebugRequestEntry[] = [];
+
 export const defaultState: WorkspaceState = {
+  workingDirectory: '.',
   selectedProvider: 'anthropic',
   providerConnections: defaultProviderConnections,
   tools: defaultTools,
   mcpServers: defaultMcpServers,
   transcript: defaultTranscript,
+  debugRequests: defaultDebugRequests,
 };

@@ -4,7 +4,40 @@ use futures_util::StreamExt;
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::env;
 use tauri::{AppHandle, Emitter};
+
+fn install_rustls_crypto_provider() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+}
+
+fn sanitize_process_proxy_env() {
+    for key in [
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+    ] {
+        let Some(value) = env::var_os(key) else {
+            continue;
+        };
+
+        let value = value.to_string_lossy();
+        if is_invalid_loopback_proxy_value(&value) {
+            env::remove_var(key);
+            eprintln!("sep app ignored invalid proxy env {key}={value}");
+        }
+    }
+}
+
+fn is_invalid_loopback_proxy_value(value: &str) -> bool {
+    let normalized = value.trim().to_ascii_lowercase();
+    normalized.contains("127.0.0.1:9")
+        || normalized.contains("localhost:9")
+        || normalized.contains("[::1]:9")
+}
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -13,10 +46,7 @@ struct ChatRequest {
     provider_id: String,
     endpoint: String,
     api_key: String,
-    model: String,
-    variant: Option<String>,
-    store: Option<bool>,
-    prompt: String,
+    payload: Value,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -74,28 +104,11 @@ async fn stream_openai(
     client: &reqwest::Client,
     request: &ChatRequest,
 ) -> Result<(), ErrorResponse> {
-    let endpoint = normalize_endpoint(&request.endpoint, "/chat/completions");
-
     let response = client
-        .post(endpoint)
+        .post(request.endpoint.clone())
         .header(CONTENT_TYPE, "application/json")
         .header(AUTHORIZATION, format!("Bearer {}", request.api_key))
-        .json(&serde_json::json!({
-            "model": request.model,
-            "stream": true,
-            "store": request.store.unwrap_or(false),
-            "reasoning_effort": request.variant.clone().unwrap_or_else(|| "medium".into()),
-            "messages": [
-                {
-                    "role": "system",
-                    "content": "You are a concise desktop coding assistant. Reply directly to the user's request."
-                },
-                {
-                    "role": "user",
-                    "content": request.prompt,
-                }
-            ]
-        }))
+        .json(&request.payload)
         .send()
         .await
         .map_err(to_error)?;
@@ -142,25 +155,12 @@ async fn stream_anthropic(
     client: &reqwest::Client,
     request: &ChatRequest,
 ) -> Result<(), ErrorResponse> {
-    let endpoint = normalize_endpoint(&request.endpoint, "/v1/messages");
-
     let response = client
-        .post(endpoint)
+        .post(request.endpoint.clone())
         .header(CONTENT_TYPE, "application/json")
         .header("x-api-key", request.api_key.clone())
         .header("anthropic-version", "2023-06-01")
-        .json(&serde_json::json!({
-            "model": request.model,
-            "max_tokens": 800,
-            "stream": true,
-            "system": "You are a concise desktop coding assistant. Reply directly to the user's request.",
-            "messages": [
-                {
-                    "role": "user",
-                    "content": request.prompt,
-                }
-            ]
-        }))
+        .json(&request.payload)
         .send()
         .await
         .map_err(to_error)?;
@@ -264,15 +264,6 @@ fn emit_event(
     })
 }
 
-fn normalize_endpoint(endpoint: &str, suffix: &str) -> String {
-    let trimmed = endpoint.trim_end_matches('/');
-    if trimmed.ends_with(suffix.trim_start_matches('/')) {
-        trimmed.to_string()
-    } else {
-        format!("{}{}", trimmed, suffix)
-    }
-}
-
 fn json_error(error: serde_json::Error) -> ErrorResponse {
     ErrorResponse {
         message: error.to_string(),
@@ -286,7 +277,11 @@ fn to_error(error: reqwest::Error) -> ErrorResponse {
 }
 
 fn main() {
+    install_rustls_crypto_provider();
+    sanitize_process_proxy_env();
+
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![send_chat])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
