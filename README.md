@@ -42,6 +42,7 @@
 - **桌面端流式对话**
   - Tauri 后端已接入流式请求与事件回传。
   - 当前真正打通的 Provider 是 `OpenAI` 和 `Anthropic`。
+  - 正式回答前由 LLM 自己判断是否需要 plan；需要时会生成简短 plan 并显示在 transcript 中。
 - **基础 Tools / MCP 展示**
   - UI 中已提供内建工具与 MCP 状态区，便于后续扩展。
   - 当前对模型默认暴露的工具分为 `Shell`、`Editor` 和 `Web Fetch`；`Shell` 负责命令、依赖、测试、构建、搜索和 Git，`Editor` 负责直接读写和修改文件内容。
@@ -215,6 +216,7 @@ This repository currently uses:
 - **Desktop streaming chat**
   - The Tauri backend already supports streaming requests and event forwarding.
   - The providers currently wired end-to-end are `OpenAI` and `Anthropic`.
+  - Before the main answer, the LLM decides whether a plan is needed; when it is, a short plan appears in the transcript.
 - **Basic Tools / MCP presentation**
   - The UI already exposes built-in tool and MCP sections for future expansion.
   - The model-facing toolset is split into `Shell`, `Editor`, and `Web Fetch`; `Shell` handles commands, dependencies, tests, builds, search, and git, while `Editor` handles direct file reads and edits.

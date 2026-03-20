@@ -17,7 +17,7 @@ use genai::{
     adapter::AdapterKind,
     chat::{
         ChatMessage, ChatOptions, ChatRequest, ChatResponse, ChatStreamEvent, ContentPart,
-        MessageContent, ReasoningEffort, Tool, ToolCall, ToolResponse,
+        MessageContent, ReasoningEffort, Tool, ToolCall, ToolResponse, Usage,
     },
     resolver::{AuthData, Endpoint, ServiceTargetResolver},
 };
@@ -143,6 +143,7 @@ struct ModelResult {
     content: String,
     tool_calls: Vec<ToolCallPayload>,
     raw_response_text: Option<String>,
+    usage: Option<TokenUsagePayload>,
 }
 
 #[derive(Debug, Serialize)]
@@ -166,6 +167,18 @@ struct StreamEventPayload {
     text: Option<String>,
     message: Option<String>,
     raw_response_text: Option<String>,
+    usage: Option<TokenUsagePayload>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TokenUsagePayload {
+    prompt_tokens: Option<i32>,
+    completion_tokens: Option<i32>,
+    total_tokens: Option<i32>,
+    reasoning_tokens: Option<i32>,
+    cached_tokens: Option<i32>,
+    cache_creation_tokens: Option<i32>,
 }
 
 #[derive(Debug, Serialize)]
@@ -508,20 +521,28 @@ async fn build_model_stream(
             .map_err(|error| format_error_chain(&error))?;
 
         let result = model_result_from_chat_response(chat_response);
+        let ModelResult {
+            content,
+            raw_response_text,
+            usage,
+            ..
+        } = result;
         let event_stream = stream! {
             yield Ok(sse_json_event(StreamEventPayload {
                 event_type: "start".into(),
                 text: None,
                 message: None,
                 raw_response_text: None,
+                usage: None,
             }));
 
-            if !result.content.is_empty() {
+            if !content.is_empty() {
                 yield Ok(sse_json_event(StreamEventPayload {
                     event_type: "chunk".into(),
-                    text: Some(result.content),
+                    text: Some(content),
                     message: None,
                     raw_response_text: None,
+                    usage: None,
                 }));
             }
 
@@ -529,7 +550,8 @@ async fn build_model_stream(
                 event_type: "done".into(),
                 text: None,
                 message: None,
-                raw_response_text: result.raw_response_text,
+                raw_response_text,
+                usage,
             }));
         };
 
@@ -549,6 +571,7 @@ async fn build_model_stream(
             text: None,
             message: None,
             raw_response_text: None,
+            usage: None,
         }));
 
         while let Some(event) = chat_stream.stream.next().await {
@@ -561,18 +584,20 @@ async fn build_model_stream(
                             text: Some(chunk.content),
                             message: None,
                             raw_response_text: None,
+                            usage: None,
                         }));
                     }
                 }
                 Ok(ChatStreamEvent::ReasoningChunk(_)) => {}
                 Ok(ChatStreamEvent::ThoughtSignatureChunk(_)) => {}
                 Ok(ChatStreamEvent::ToolCallChunk(_)) => {}
-                Ok(ChatStreamEvent::End(_)) => {
+                Ok(ChatStreamEvent::End(end_event)) => {
                     yield Ok(sse_json_event(StreamEventPayload {
                         event_type: "done".into(),
                         text: None,
                         message: None,
                         raw_response_text: None,
+                        usage: normalize_usage(end_event.captured_usage.as_ref()),
                     }));
                     break;
                 }
@@ -582,6 +607,7 @@ async fn build_model_stream(
                         text: None,
                         message: Some(format_error_chain(&error)),
                         raw_response_text: None,
+                        usage: None,
                     }));
                     break;
                 }
@@ -876,12 +902,44 @@ fn model_result_from_chat_response(response: ChatResponse) -> ModelResult {
         .into_iter()
         .map(tool_call_to_payload)
         .collect();
+    let usage = normalize_usage(Some(&response.usage));
 
     ModelResult {
         content,
         tool_calls,
         raw_response_text,
+        usage,
     }
+}
+
+fn normalize_usage(usage: Option<&Usage>) -> Option<TokenUsagePayload> {
+    let usage = usage?;
+    let payload = TokenUsagePayload {
+        prompt_tokens: usage.prompt_tokens,
+        completion_tokens: usage.completion_tokens,
+        total_tokens: usage.total_tokens,
+        reasoning_tokens: usage
+            .completion_tokens_details
+            .as_ref()
+            .and_then(|details| details.reasoning_tokens),
+        cached_tokens: usage
+            .prompt_tokens_details
+            .as_ref()
+            .and_then(|details| details.cached_tokens),
+        cache_creation_tokens: usage
+            .prompt_tokens_details
+            .as_ref()
+            .and_then(|details| details.cache_creation_tokens),
+    };
+
+    let has_any_value = payload.prompt_tokens.is_some()
+        || payload.completion_tokens.is_some()
+        || payload.total_tokens.is_some()
+        || payload.reasoning_tokens.is_some()
+        || payload.cached_tokens.is_some()
+        || payload.cache_creation_tokens.is_some();
+
+    has_any_value.then_some(payload)
 }
 
 fn tool_call_to_payload(tool_call: &ToolCall) -> ToolCallPayload {

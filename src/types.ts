@@ -1,9 +1,19 @@
-export type ProviderId = 'anthropic' | 'openai' | 'google' | 'opencode';
+export type BuiltinProviderId = 'anthropic' | 'openai' | 'google' | 'opencode';
+export type ProviderId = string;
 export type ModelVariant = 'low' | 'medium' | 'high' | 'xhigh';
 export type TransportKind = 'browser' | 'tauri';
 export type DebugRequestStatus = 'pending' | 'done' | 'error';
 
 export type ToolCategory = 'coding' | 'search' | 'filesystem' | 'network';
+
+export interface TokenUsage {
+  promptTokens?: number;
+  completionTokens?: number;
+  totalTokens?: number;
+  reasoningTokens?: number;
+  cachedTokens?: number;
+  cacheCreationTokens?: number;
+}
 
 export interface ProviderProfile {
   id: ProviderId;
@@ -14,8 +24,19 @@ export interface ProviderProfile {
   activeModel: string;
 }
 
+export interface ProviderModelPreset {
+  id: string;
+  name: string;
+  contextLimit: number;
+  outputLimit: number;
+  variants: ModelVariant[];
+}
+
 export interface ProviderConnection {
   providerId: ProviderId;
+  adapterKind?: BuiltinProviderId;
+  displayName?: string;
+  customModels?: ProviderModelPreset[];
   enabled: boolean;
   connected: boolean;
   endpoint: string;
@@ -23,14 +44,6 @@ export interface ProviderConnection {
   selectedModel: string;
   selectedVariant: ModelVariant;
   store: boolean;
-}
-
-export interface ProviderModelPreset {
-  id: string;
-  name: string;
-  contextLimit: number;
-  outputLimit: number;
-  variants: ModelVariant[];
 }
 
 export interface ToolDefinition {
@@ -49,12 +62,19 @@ export interface McpServer {
   status: 'ready' | 'idle';
 }
 
+export interface PlanStep {
+  id: string;
+  title: string;
+  status: 'pending' | 'in_progress' | 'completed';
+}
+
 export interface TranscriptEntry {
   id: string;
   role: 'system' | 'user' | 'assistant' | 'tool';
   title: string;
   body: string;
   detail?: string;
+  planSteps?: PlanStep[];
   timestamp: string;
 }
 
@@ -76,7 +96,20 @@ export interface DebugRequestEntry {
   durationMs?: number;
   error?: string;
   requestJson: string;
+  responseText?: string;
+  traceText?: string;
   rawResponseText?: string;
+  usage?: TokenUsage;
+}
+
+export interface Session {
+  id: string;
+  name: string;
+  workingDirectory: string;
+  selectedProvider: ProviderId;
+  transcript: TranscriptEntry[];
+  createdAt: number;
+  updatedAt: number;
 }
 
 export interface WorkspaceState {
@@ -87,4 +120,6 @@ export interface WorkspaceState {
   mcpServers: McpServer[];
   transcript: TranscriptEntry[];
   debugRequests: DebugRequestEntry[];
+  sessions: Session[];
+  currentSessionId: string;
 }

@@ -1,5 +1,6 @@
 :root {
   color-scheme: dark;
+  --tool-panel-width: 340px;
   --bg: #0a0d0f;
   --bg-elevated: rgba(15, 19, 21, 0.78);
   --bg-panel: rgba(11, 14, 16, 0.86);
@@ -191,6 +192,16 @@ button {
   grid-template-rows: minmax(0, 1fr) auto;
   min-height: 0;
   overflow: hidden;
+  position: relative;
+}
+
+.conversation-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--tool-panel-width);
+  gap: 16px;
+  min-height: 0;
+  overflow: hidden;
+  padding: 16px 18px 0;
 }
 
 .composer,
@@ -465,11 +476,11 @@ h2 {
   flex-direction: column;
   gap: 14px;
   overflow: auto;
-  padding-top: 24px;
-  padding-bottom: 24px;
+  padding: 8px 0 24px;
   min-height: 0;
   scrollbar-width: none;
   -ms-overflow-style: none;
+  position: relative;
 }
 
 .transcript::-webkit-scrollbar {
@@ -577,6 +588,47 @@ h2 {
   font-family: "IBM Plex Mono", "Consolas", monospace;
   font-size: 12px;
   line-height: 1.6;
+}
+
+.plan-card {
+  margin-top: 4px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--field-bg-soft) 84%, transparent);
+  overflow: hidden;
+}
+
+.plan-summary {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  cursor: pointer;
+}
+
+.plan-summary::-webkit-details-marker {
+  display: none;
+}
+
+.plan-summary-text {
+  color: var(--assistant);
+  font-weight: 600;
+}
+
+.plan-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 12px 12px;
+}
+
+.plan-step-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  line-height: 1.5;
 }
 
 .markdown-content {
@@ -728,14 +780,121 @@ h2 {
   justify-content: flex-end;
 }
 
+.tool-activity-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  height: 100%;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--accent) 4%, transparent), transparent 22%),
+    color-mix(in srgb, var(--bg-elevated) 90%, transparent);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.14);
+  min-height: 0;
+  overflow: hidden;
+}
+
+.tool-activity-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.tool-activity-header .helper-text {
+  margin: 4px 0 0;
+}
+
+.tool-activity-title {
+  min-width: 0;
+}
+
+.tool-panel-toggle {
+  flex: 0 0 auto;
+  padding: 7px 12px;
+  border-radius: 999px;
+}
+
+.tool-activity-list {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow-y: auto;
+  min-height: 0;
+  padding-right: 4px;
+  scrollbar-color: color-mix(in srgb, var(--muted) 55%, transparent) transparent;
+}
+
+.tool-activity-card {
+  flex: 0 0 auto;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, white 3%, transparent), transparent),
+    color-mix(in srgb, var(--field-bg-soft) 78%, transparent);
+  overflow: hidden;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, white 4%, transparent);
+}
+
+.tool-activity-summary {
+  list-style: none;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  cursor: pointer;
+}
+
+.tool-activity-summary::-webkit-details-marker {
+  display: none;
+}
+
+.tool-activity-summary strong {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.tool-activity-summary p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.tool-activity-summary time {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.tool-activity-copy {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.tool-activity-empty {
+  margin: 0;
+  padding: 12px 2px 0;
+}
+
 .composer {
   padding-top: 0;
   padding-bottom: 14px;
 }
 
 .composer > * {
-  max-width: 760px;
-  margin-left: auto;
+  max-width: min(760px, calc(100% - var(--tool-panel-width) - 16px - 36px));
+  margin-left: 18px;
   margin-right: auto;
   width: 100%;
 }
@@ -1257,16 +1416,67 @@ h2 {
   min-height: 360px;
   border-radius: 12px;
   border: 1px solid var(--line);
-  background: rgba(9, 12, 14, 0.84);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, white 4%, transparent), transparent),
+    linear-gradient(180deg, color-mix(in srgb, var(--accent) 3%, transparent), transparent 28%),
+    var(--field-bg);
   color: var(--text);
   font: 12px/1.6 "IBM Plex Mono", "Consolas", monospace;
-  padding: 12px;
+  padding: 14px 15px;
   resize: vertical;
   outline: none;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, white 4%, transparent),
+    0 10px 26px color-mix(in srgb, black 10%, transparent);
+  transition: border-color 140ms ease, box-shadow 140ms ease, background-color 140ms ease;
 }
 
 .config-editor:focus {
   border-color: var(--field-border-focus);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, white 5%, transparent),
+    0 0 0 4px color-mix(in srgb, var(--accent) 12%, transparent),
+    0 14px 30px color-mix(in srgb, black 10%, transparent);
+}
+
+.config-editor-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--accent) 5%, transparent), transparent 44%),
+    color-mix(in srgb, var(--field-bg-soft) 78%, transparent);
+}
+
+.config-editor-label {
+  margin-bottom: 0;
+}
+
+.config-editor-label > span:first-child {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.custom-provider-list,
+.custom-model-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.custom-provider-card,
+.custom-model-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--accent) 5%, transparent), transparent 36%),
+    color-mix(in srgb, var(--field-bg-soft) 82%, transparent);
 }
 
 .limit-card {
@@ -1577,6 +1787,17 @@ input[type='checkbox'] {
     min-height: 70vh;
   }
 
+  .conversation-layout {
+    grid-template-columns: 1fr;
+    padding-top: 14px;
+  }
+
+  .composer > * {
+    max-width: 760px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+
   .workspace-sidebar {
     min-height: auto;
   }
@@ -1592,6 +1813,11 @@ input[type='checkbox'] {
 
   .debug-history-pane {
     max-height: 42vh;
+  }
+
+  .tool-activity-panel {
+    order: -1;
+    max-height: 240px;
   }
 }
 

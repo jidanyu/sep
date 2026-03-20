@@ -7,6 +7,7 @@ import {
   ToolDefinition,
   TranscriptEntry,
   WorkspaceState,
+  Session,
 } from '../types';
 
 export const providerProfiles: ProviderProfile[] = [
@@ -71,6 +72,8 @@ export const defaultTools: ToolDefinition[] = [
 export const defaultProviderConnections: ProviderConnection[] = [
   {
     providerId: 'anthropic',
+    adapterKind: 'anthropic',
+    displayName: 'Anthropic',
     enabled: true,
     connected: true,
     endpoint: 'https://api.anthropic.com',
@@ -81,6 +84,8 @@ export const defaultProviderConnections: ProviderConnection[] = [
   },
   {
     providerId: 'openai',
+    adapterKind: 'openai',
+    displayName: 'OpenAI',
     enabled: true,
     connected: false,
     endpoint: 'https://api.openai.com/v1',
@@ -91,6 +96,8 @@ export const defaultProviderConnections: ProviderConnection[] = [
   },
   {
     providerId: 'google',
+    adapterKind: 'google',
+    displayName: 'Google',
     enabled: false,
     connected: false,
     endpoint: 'https://generativelanguage.googleapis.com',
@@ -101,6 +108,8 @@ export const defaultProviderConnections: ProviderConnection[] = [
   },
   {
     providerId: 'opencode',
+    adapterKind: 'opencode',
+    displayName: 'OpenCode Bridge',
     enabled: true,
     connected: false,
     endpoint: 'http://127.0.0.1:4096',
@@ -180,6 +189,21 @@ export const defaultTranscript: TranscriptEntry[] = [
 
 export const defaultDebugRequests: DebugRequestEntry[] = [];
 
+export function createDefaultSession(workingDirectory = '.'): Session {
+  const now = Date.now();
+  return {
+    id: crypto.randomUUID(),
+    name: 'Default Session',
+    workingDirectory,
+    selectedProvider: 'anthropic',
+    transcript: [...defaultTranscript],
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+(window as { crypto?: { randomUUID(): string } }).crypto ?? { randomUUID: () => `${Date.now()}-${Math.random()}` };
+
 export const defaultState: WorkspaceState = {
   workingDirectory: '.',
   selectedProvider: 'anthropic',
@@ -188,4 +212,11 @@ export const defaultState: WorkspaceState = {
   mcpServers: defaultMcpServers,
   transcript: defaultTranscript,
   debugRequests: defaultDebugRequests,
+  sessions: [],
+  currentSessionId: '',
 };
+
+// Initialize with a default session
+const initialSession = createDefaultSession('.');
+defaultState.sessions = [initialSession];
+defaultState.currentSessionId = initialSession.id;

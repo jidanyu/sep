@@ -3,12 +3,15 @@ import { open } from '@tauri-apps/plugin-dialog';
 import MarkdownContent from './components/MarkdownContent';
 import { defaultState, providerModelPresets, providerProfiles } from './data/mock';
 import {
+  BuiltinProviderId,
   DebugRequestEntry,
   ModelVariant,
+  PlanStep,
   ProviderConnection,
   ProviderId,
   ProviderModelPreset,
   ToolDefinition,
+  TokenUsage,
   TranscriptEntry,
   TransportKind,
   WorkspaceState,
@@ -17,8 +20,10 @@ import {
 type Locale = 'zh-CN' | 'en';
 type SettingsSection = 'openai' | 'claude' | 'tools' | 'appearance';
 type ThemeMode = 'dark' | 'rust-light';
-type DebugDetailTab = 'request' | 'response';
-type PersistedWorkspaceState = Omit<WorkspaceState, 'providerConnections'>;
+type DebugDetailTab = 'request' | 'trace' | 'response';
+type PersistedWorkspaceState = Omit<WorkspaceState, 'providerConnections'> & {
+  customProviders?: ProviderConnection[];
+};
 
 interface ContextMessage {
   role: 'user' | 'assistant';
@@ -73,6 +78,7 @@ interface LocalModelResult {
   content: string;
   toolCalls: ToolCallMessage[];
   rawResponseText?: string;
+  usage?: TokenUsage;
 }
 
 interface ParsedOpenAiConfig {
@@ -99,6 +105,7 @@ interface LocalModelStreamEvent {
   text?: string;
   message?: string;
   rawResponseText?: string;
+  usage?: TokenUsage;
 }
 
 interface NativeProviderConfigResult {
@@ -135,10 +142,29 @@ interface OpenDirectoryDialogResult {
   path?: string | null;
 }
 
+const BUILTIN_PROVIDER_IDS = new Set<BuiltinProviderId>(['anthropic', 'openai', 'google', 'opencode']);
+const DEFAULT_CUSTOM_PROVIDER_MODELS: ProviderModelPreset[] = [
+  {
+    id: 'gpt-5.3-codex',
+    name: 'GPT-5.3 Codex',
+    contextLimit: 400000,
+    outputLimit: 128000,
+    variants: ['low', 'medium', 'high', 'xhigh'],
+  },
+];
+
+interface GeneratedPlan {
+  usePlan: boolean;
+  steps: PlanStep[];
+  rawText: string;
+}
+
 const SYSTEM_PROMPT =
-  'You are a concise desktop coding assistant. Reply directly to the user request. When using tools, all paths must be workspace-relative. When creating or editing files, always provide an explicit `path` and the full `content`.';
+  'You are a concise desktop coding assistant. Complete the user\'s request directly, use tools when needed, keep changes focused, and provide explicit file paths when reading or modifying files. If the user asks you to write, edit, fix, implement, or refactor code, you must actually modify files with tools before giving a final answer. Do not stop at analysis, planning, or file inspection unless the user only asked for explanation or you are truly blocked.';
+const PLAN_SYSTEM_PROMPT =
+  'You decide whether a coding request needs an execution plan. Return strict JSON only. Shape: {"usePlan":false} when the task is simple or purely informational. Shape: {"usePlan":true,"steps":[{"title":"short step","status":"pending"}]} when a plan would help. Use 2 to 5 short steps. Allowed status values: pending, in_progress, completed.';
 const MAX_CONTEXT_MESSAGES = 6;
-const MAX_TOOL_ROUNDS = 8;
+const MAX_TOOL_ROUNDS = 16;
 const TOOL_SERVER_URL = 'http://127.0.0.1:4097';
 const TOOL_SERVER_READY_TIMEOUT_MS = 45_000;
 const TOOL_SERVER_HEALTH_TIMEOUT_MS = 1_500;
@@ -209,11 +235,23 @@ const copy = {
     chooseVariant: '推理强度',
     editJson: '直接修改配置 JSON',
     saveJson: '保存配置',
+    customProviders: '自定义供应商',
+    addCustomProvider: '添加自定义供应商',
+    removeCustomProvider: '删除供应商',
+    customProviderHint: '添加 OpenAI 兼容供应商，配置 URL、Key 和模型元信息后可直接在主界面选择。',
+    providerName: '供应商名称',
+    modelName: '模型名称',
+    modelIdLabel: '模型 ID',
+    contextLimit: '上下文长度',
+    outputLimit: '输出长度',
+    addModel: '添加模型',
+    removeModel: '删除模型',
     openaiConfig: 'OpenAI',
     claudeConfig: 'Claude',
     toolsConfig: '工具',
     appearanceConfig: '外观',
     rawConfig: '原始配置',
+    rawConfigHint: '直接编辑 OpenAI 兼容配置。这里会沿用当前主题，不再单独使用深色编辑区。',
     jsonApplied: 'OpenAI JSON 配置已应用。',
     jsonInvalid: 'JSON 格式无效，无法应用配置。',
     openaiConfigDesc: '兼容 OpenAI / Codex 的 provider 配置',
@@ -247,6 +285,7 @@ const copy = {
     working: '处理中',
     promptQueued: '已加入请求',
     streamingResponse: '流式响应',
+    generatedPlan: '执行计划',
     providerSwitched: '已切换 Provider',
     sessionCleared: '会话已清空',
     languageMode: '中文模式',
@@ -289,16 +328,29 @@ const copy = {
     openDebug: '打开调试',
     clearDebug: '清空历史',
     requestHistory: '请求历史',
+    toolActivity: '工具活动',
+    toolActivityHint: '这里展示最近的 tool 调用，不再插入主聊天区。',
+    noToolActivity: '当前还没有 tool 调用记录。',
     contextPolicy: '上下文策略',
     contextPolicyValue: (count: number) => `最近 ${count} 条对话消息 + 当前输入`,
     historyMessages: '历史消息数',
     payloadMessages: '发送消息数',
     transportLabel: '通道',
     outputChars: '输出字符',
+    inputTokens: '输入 Tokens',
+    outputTokens: '输出 Tokens',
+    totalTokens: '总 Tokens',
+    reasoningTokens: '推理 Tokens',
+    cachedTokens: '缓存命中 Tokens',
+    cacheCreationTokens: '缓存写入 Tokens',
     durationLabel: '耗时',
     requestPayload: '请求参数',
+    traceLog: '调用轨迹',
+    responseText: '回复内容',
     rawResponse: '原始响应',
-    noRawResponse: '当前请求还没有可展示的原始响应。工具轮次会保留原始返回；流式请求暂不保留完整事件流。',
+    noTrace: '当前请求还没有可展示的轨迹。',
+    noResponseText: '当前请求还没有可展示的回复内容。',
+    noRawResponse: '当前请求还没有可展示的原始响应。',
     noDebugRequests: '当前还没有请求记录。发送一条消息后，这里会显示实际发给模型的参数。',
     statusPending: '待完成',
     statusDone: '已完成',
@@ -332,11 +384,23 @@ const copy = {
     chooseVariant: 'Variant',
     editJson: 'Edit config JSON',
     saveJson: 'Save config',
+    customProviders: 'Custom providers',
+    addCustomProvider: 'Add custom provider',
+    removeCustomProvider: 'Remove provider',
+    customProviderHint: 'Add an OpenAI-compatible provider with endpoint, key, and model metadata, then select it from the main composer.',
+    providerName: 'Provider name',
+    modelName: 'Model name',
+    modelIdLabel: 'Model ID',
+    contextLimit: 'Context limit',
+    outputLimit: 'Output limit',
+    addModel: 'Add model',
+    removeModel: 'Remove model',
     openaiConfig: 'OpenAI',
     claudeConfig: 'Claude',
     toolsConfig: 'Tools',
     appearanceConfig: 'Appearance',
     rawConfig: 'Raw config',
+    rawConfigHint: 'Edit the OpenAI-compatible config directly. The editor now follows the active theme instead of using a separate dark block.',
     jsonApplied: 'OpenAI JSON config applied.',
     jsonInvalid: 'Invalid JSON format.',
     openaiConfigDesc: 'OpenAI / Codex compatible provider config',
@@ -370,6 +434,7 @@ const copy = {
     working: 'Working',
     promptQueued: 'Prompt queued',
     streamingResponse: 'Streaming response',
+    generatedPlan: 'Execution plan',
     providerSwitched: 'Provider switched',
     sessionCleared: 'Session cleared',
     languageMode: 'Chinese mode',
@@ -412,16 +477,29 @@ const copy = {
     openDebug: 'Open debug',
     clearDebug: 'Clear history',
     requestHistory: 'Request history',
+    toolActivity: 'Tool activity',
+    toolActivityHint: 'Recent tool calls appear here instead of inside the main chat transcript.',
+    noToolActivity: 'No tool calls yet.',
     contextPolicy: 'Context policy',
     contextPolicyValue: (count: number) => `Last ${count} chat messages + current prompt`,
     historyMessages: 'History messages',
     payloadMessages: 'Payload messages',
     transportLabel: 'Transport',
     outputChars: 'Output chars',
+    inputTokens: 'Input tokens',
+    outputTokens: 'Output tokens',
+    totalTokens: 'Total tokens',
+    reasoningTokens: 'Reasoning tokens',
+    cachedTokens: 'Cached tokens',
+    cacheCreationTokens: 'Cache creation tokens',
     durationLabel: 'Duration',
     requestPayload: 'Request payload',
+    traceLog: 'Trace',
+    responseText: 'Response text',
     rawResponse: 'Raw response',
-    noRawResponse: 'No raw response is available yet. Tool rounds keep the original model response; streaming requests do not keep the full event stream yet.',
+    noTrace: 'No trace is available yet.',
+    noResponseText: 'No response text is available yet.',
+    noRawResponse: 'No raw response is available yet.',
     noDebugRequests: 'No request has been sent yet. Send a message and the exact LLM payload will appear here.',
     statusPending: 'Pending',
     statusDone: 'Done',
@@ -437,13 +515,20 @@ const copy = {
 const USER_PROMPT_TITLES = new Set<string>([copy['zh-CN'].promptQueued, copy['en'].promptQueued]);
 const ASSISTANT_RESPONSE_TITLES = new Set<string>([copy['zh-CN'].streamingResponse, copy['en'].streamingResponse]);
 
-function createEntry(role: TranscriptEntry['role'], title: string, body: string, detail?: string): TranscriptEntry {
+function createEntry(
+  role: TranscriptEntry['role'],
+  title: string,
+  body: string,
+  detail?: string,
+  planSteps?: PlanStep[],
+): TranscriptEntry {
   return {
     id: crypto.randomUUID(),
     role,
     title,
     body,
     detail,
+    planSteps,
     timestamp: new Date().toLocaleTimeString([], {
       hour: '2-digit',
       minute: '2-digit',
@@ -452,7 +537,7 @@ function createEntry(role: TranscriptEntry['role'], title: string, body: string,
 }
 
 function mergeProviderConnections(connections?: ProviderConnection[]) {
-  return defaultState.providerConnections.map((defaultConnection) => {
+  const mergedDefaults = defaultState.providerConnections.map((defaultConnection) => {
     const savedConnection = connections?.find((connection) => connection.providerId === defaultConnection.providerId);
 
     return {
@@ -460,12 +545,103 @@ function mergeProviderConnections(connections?: ProviderConnection[]) {
       ...savedConnection,
     };
   });
+
+  const extraConnections = (connections ?? []).filter(
+    (connection) => !defaultState.providerConnections.some((defaultConnection) => defaultConnection.providerId === connection.providerId),
+  );
+
+  return [...mergedDefaults, ...extraConnections];
+}
+
+function isBuiltinProviderId(providerId: ProviderId): providerId is BuiltinProviderId {
+  return BUILTIN_PROVIDER_IDS.has(providerId as BuiltinProviderId);
+}
+
+function getProviderAdapterKind(connection: ProviderConnection | undefined): BuiltinProviderId {
+  if (!connection) {
+    return 'openai';
+  }
+
+  if (connection.adapterKind && isBuiltinProviderId(connection.adapterKind)) {
+    return connection.adapterKind;
+  }
+
+  if (isBuiltinProviderId(connection.providerId)) {
+    return connection.providerId;
+  }
+
+  return 'openai';
+}
+
+function isCustomProviderConnection(connection: ProviderConnection) {
+  return !isBuiltinProviderId(connection.providerId);
+}
+
+function getProviderDisplayName(providerId: ProviderId, connections: ProviderConnection[]) {
+  const connection = connections.find((item) => item.providerId === providerId);
+  if (connection?.displayName?.trim()) {
+    return connection.displayName.trim();
+  }
+
+  return providerProfiles.find((provider) => provider.id === providerId)?.name ?? providerId;
+}
+
+function sanitizeCustomProvider(connection: ProviderConnection): ProviderConnection {
+  return {
+    ...connection,
+    adapterKind: 'openai',
+    displayName: connection.displayName?.trim() || connection.providerId,
+    customModels: (connection.customModels ?? []).map((model) => ({
+      ...model,
+      id: model.id.trim(),
+      name: model.name.trim() || model.id.trim(),
+      contextLimit: Number.isFinite(model.contextLimit) ? model.contextLimit : 0,
+      outputLimit: Number.isFinite(model.outputLimit) ? model.outputLimit : 0,
+      variants: model.variants?.length ? model.variants : ['low', 'medium', 'high', 'xhigh'],
+    })),
+  };
+}
+
+function mergeCustomProviderState(
+  providerConnections: ProviderConnection[],
+  customProviders?: ProviderConnection[],
+) {
+  const customById = new Map(
+    (customProviders ?? []).map((connection) => [connection.providerId, sanitizeCustomProvider(connection)]),
+  );
+
+  const merged = providerConnections.map((connection) => {
+    if (!isCustomProviderConnection(connection)) {
+      return connection;
+    }
+
+    const persistedCustom = customById.get(connection.providerId);
+    return sanitizeCustomProvider({
+      ...connection,
+      ...persistedCustom,
+    });
+  });
+
+  for (const [providerId, customProvider] of customById.entries()) {
+    if (!merged.some((connection) => connection.providerId === providerId)) {
+      merged.push(customProvider);
+    }
+  }
+
+  return merged;
 }
 
 function buildPersistedWorkspaceState(state: WorkspaceState): PersistedWorkspaceState {
   const { providerConnections, ...persistedState } = state;
   void providerConnections;
-  return persistedState;
+  return {
+    ...persistedState,
+    customProviders: state.providerConnections.filter(isCustomProviderConnection).map(sanitizeCustomProvider),
+  };
+}
+
+function formatUsageMetric(value?: number) {
+  return typeof value === 'number' ? value.toLocaleString() : '—';
 }
 
 function mergeTools(tools?: ToolDefinition[]) {
@@ -500,6 +676,7 @@ function hydratePersistedWorkspaceState(persistedState?: Partial<PersistedWorksp
     ...persistedState,
     tools: mergeTools(persistedState.tools),
     mcpServers: mergeMcpServers(persistedState.mcpServers),
+    customProviders: Array.isArray(persistedState.customProviders) ? persistedState.customProviders : [],
     debugRequests: Array.isArray(persistedState.debugRequests) ? persistedState.debugRequests : defaultState.debugRequests,
   };
 }
@@ -622,6 +799,28 @@ function resolveOpenAiDisplayEndpoint(providerConnection: ProviderConnection) {
   );
 }
 
+function buildOpenAiPromptEnvelope(
+  providerConnection: ProviderConnection,
+  messages: Array<Record<string, unknown>>,
+) {
+  if (!openAiModelUsesResponsesApi(providerConnection.selectedModel)) {
+    return { messages };
+  }
+
+  const normalizedMessages = messages.filter((message, index) => {
+    if (index !== 0) {
+      return true;
+    }
+
+    return !(message.role === 'system' && message.content === SYSTEM_PROMPT);
+  });
+
+  return {
+    instructions: SYSTEM_PROMPT,
+    messages: normalizedMessages,
+  };
+}
+
 function resolveEffectiveProviderConnection(
   providerConnection: ProviderConnection | undefined,
   parsedOpenAiConfig: ParsedOpenAiConfig | null,
@@ -656,8 +855,9 @@ function buildPreparedProviderRequest(
 ): PreparedProviderRequest {
   const contextMessages = buildContextMessages(transcript, prompt);
   const historyMessageCount = Math.max(contextMessages.length - 1, 0);
+  const adapterKind = getProviderAdapterKind(providerConnection);
 
-  if (providerId === 'openai' || providerId === 'opencode') {
+  if (adapterKind === 'openai' || adapterKind === 'opencode') {
     const endpoint = resolveOpenAiDisplayEndpoint(providerConnection);
     const headers = {
       'Content-Type': 'application/json',
@@ -670,12 +870,13 @@ function buildPreparedProviderRequest(
       },
       ...contextMessages,
     ];
+    const promptEnvelope = buildOpenAiPromptEnvelope(providerConnection, messages);
     const body = {
       model: providerConnection.selectedModel,
       stream: true,
       store: providerConnection.store,
       reasoning_effort: providerConnection.selectedVariant,
-      messages,
+      ...promptEnvelope,
     };
 
     return {
@@ -686,13 +887,13 @@ function buildPreparedProviderRequest(
       model: providerConnection.selectedModel,
       variant: providerConnection.selectedVariant,
       historyMessageCount,
-      payloadMessageCount: messages.length,
+      payloadMessageCount: promptEnvelope.messages.length,
       inputChars: prompt.length,
       requestJson: buildDebugRequestJson(endpoint, headers, body),
     };
   }
 
-  if (providerId === 'anthropic') {
+  if (adapterKind === 'anthropic') {
     const endpoint = normalizeEndpoint(providerConnection.endpoint, '/v1/messages');
     const headers = {
       'Content-Type': 'application/json',
@@ -724,8 +925,148 @@ function buildPreparedProviderRequest(
   throw new Error('Current provider is not yet supported.');
 }
 
-function providerSupportsCodingTools(providerId: ProviderId) {
-  return providerId === 'openai' || providerId === 'opencode';
+function buildPlanRequest(
+  providerId: ProviderId,
+  providerConnection: ProviderConnection,
+  transcript: TranscriptEntry[],
+  prompt: string,
+): PreparedProviderRequest {
+  const planPrompt = `User request:\n${prompt}\n\nDecide whether this needs a plan. Return only JSON.`;
+  const contextMessages = buildContextMessages(transcript, planPrompt);
+  const historyMessageCount = Math.max(contextMessages.length - 1, 0);
+  const adapterKind = getProviderAdapterKind(providerConnection);
+
+  if (adapterKind === 'openai' || adapterKind === 'opencode') {
+    const endpoint = resolveOpenAiDisplayEndpoint(providerConnection);
+    const headers = {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${providerConnection.apiKey}`,
+    };
+    const messages = [
+      {
+        role: 'system',
+        content: PLAN_SYSTEM_PROMPT,
+      },
+      ...contextMessages,
+    ];
+    const promptEnvelope = buildOpenAiPromptEnvelope(providerConnection, messages);
+    const body = {
+      model: providerConnection.selectedModel,
+      stream: false,
+      store: false,
+      reasoning_effort: 'low',
+      max_output_tokens: 300,
+      ...promptEnvelope,
+    };
+
+    return {
+      providerId,
+      endpoint,
+      headers,
+      body,
+      model: providerConnection.selectedModel,
+      variant: providerConnection.selectedVariant,
+      historyMessageCount,
+      payloadMessageCount: promptEnvelope.messages.length,
+      inputChars: prompt.length,
+      requestJson: buildDebugRequestJson(endpoint, headers, body),
+    };
+  }
+
+  if (adapterKind === 'anthropic') {
+    const endpoint = normalizeEndpoint(providerConnection.endpoint, '/v1/messages');
+    const headers = {
+      'Content-Type': 'application/json',
+      'x-api-key': providerConnection.apiKey,
+      'anthropic-version': '2023-06-01',
+    };
+    const body = {
+      model: providerConnection.selectedModel,
+      max_tokens: 300,
+      stream: false,
+      system: PLAN_SYSTEM_PROMPT,
+      messages: contextMessages,
+    };
+
+    return {
+      providerId,
+      endpoint,
+      headers,
+      body,
+      model: providerConnection.selectedModel,
+      variant: providerConnection.selectedVariant,
+      historyMessageCount,
+      payloadMessageCount: contextMessages.length,
+      inputChars: prompt.length,
+      requestJson: buildDebugRequestJson(endpoint, headers, body),
+    };
+  }
+
+  throw new Error('Current provider is not yet supported.');
+}
+
+function normalizePlanStatus(status: string | undefined): PlanStep['status'] {
+  if (status === 'completed') return 'completed';
+  if (status === 'in_progress') return 'in_progress';
+  return 'pending';
+}
+
+function parseGeneratedPlan(text: string): GeneratedPlan | null {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const jsonCandidate = trimmed.match(/\{[\s\S]*\}/)?.[0] ?? trimmed;
+
+  try {
+    const parsed = JSON.parse(jsonCandidate) as {
+      usePlan?: boolean;
+      steps?: Array<{ title?: string; status?: string }>;
+    };
+
+    if (parsed.usePlan === false) {
+      return {
+        usePlan: false,
+        steps: [],
+        rawText: trimmed,
+      };
+    }
+
+    const steps = (parsed.steps ?? [])
+      .map((step, index) => ({
+        id: `plan-step-${index + 1}`,
+        title: (step.title ?? '').trim(),
+        status: normalizePlanStatus(step.status),
+      }))
+      .filter((step) => step.title);
+
+    if (steps.length) {
+      return { usePlan: true, steps, rawText: trimmed };
+    }
+  } catch {
+    const fallbackSteps = trimmed
+      .split('\n')
+      .map((line) => line.replace(/^[-*\d.\s]+/, '').trim())
+      .filter(Boolean)
+      .slice(0, 5)
+      .map((title, index) => ({
+        id: `plan-step-${index + 1}`,
+        title,
+        status: 'pending' as const,
+      }));
+
+    if (fallbackSteps.length) {
+      return { usePlan: true, steps: fallbackSteps, rawText: trimmed };
+    }
+  }
+
+  return null;
+}
+
+function providerSupportsCodingTools(providerConnection: ProviderConnection | undefined) {
+  const adapterKind = getProviderAdapterKind(providerConnection);
+  return adapterKind === 'openai' || adapterKind === 'opencode';
 }
 
 function buildEnabledOpenAiTools(tools: ToolDefinition[]): OpenAiFunctionTool[] {
@@ -907,12 +1248,13 @@ function buildOpenAiAgentRequest(
     },
     ...contextMessages,
   ];
+  const promptEnvelope = buildOpenAiPromptEnvelope(providerConnection, messages);
   const body: Record<string, unknown> = {
     model: providerConnection.selectedModel,
     stream: false,
     store: providerConnection.store,
     reasoning_effort: providerConnection.selectedVariant,
-    messages,
+    ...promptEnvelope,
   };
 
   if (tools.length) {
@@ -928,7 +1270,7 @@ function buildOpenAiAgentRequest(
     model: providerConnection.selectedModel,
     variant: providerConnection.selectedVariant,
     historyMessageCount: Math.max(contextMessages.length - 1, 0),
-    payloadMessageCount: messages.length,
+    payloadMessageCount: promptEnvelope.messages.length,
     inputChars: prompt.length,
     requestJson: buildDebugRequestJson(endpoint, headers, body),
   };
@@ -945,12 +1287,13 @@ function buildOpenAiFollowUpRequest(
     'Content-Type': 'application/json',
     Authorization: `Bearer ${providerConnection.apiKey}`,
   };
+  const promptEnvelope = buildOpenAiPromptEnvelope(providerConnection, messages);
   const body: Record<string, unknown> = {
     model: providerConnection.selectedModel,
     stream: false,
     store: providerConnection.store,
     reasoning_effort: providerConnection.selectedVariant,
-    messages,
+    ...promptEnvelope,
   };
 
   if (tools.length) {
@@ -965,9 +1308,9 @@ function buildOpenAiFollowUpRequest(
     body,
     model: providerConnection.selectedModel,
     variant: providerConnection.selectedVariant,
-    historyMessageCount: Math.max(messages.length - 2, 0),
-    payloadMessageCount: messages.length,
-    inputChars: JSON.stringify(messages[messages.length - 1] ?? '').length,
+    historyMessageCount: Math.max(promptEnvelope.messages.length - 2, 0),
+    payloadMessageCount: promptEnvelope.messages.length,
+    inputChars: JSON.stringify(promptEnvelope.messages[promptEnvelope.messages.length - 1] ?? '').length,
     requestJson: buildDebugRequestJson(endpoint, headers, body),
   };
 }
@@ -1057,6 +1400,28 @@ function truncateErrorMessage(message: string, maxChars = 1200) {
   }
 
   return `${message.slice(0, maxChars)}\n…`;
+}
+
+function summarizeUserFacingError(message: string, locale: Locale) {
+  const normalized = message.trim();
+
+  if (
+    normalized.includes('text/event-stream') ||
+    normalized.includes('Response body:') ||
+    normalized.includes("Web call failed for model")
+  ) {
+    return locale === 'zh-CN'
+      ? '当前模型返回了不兼容的响应格式，请检查 Provider 配置或切换模型。详细错误已保留在调试面板中。'
+      : 'The current model returned an incompatible response format. Check the provider configuration or switch models. Full details are available in the debug panel.';
+  }
+
+  if (normalized.includes('timed out')) {
+    return locale === 'zh-CN'
+      ? '请求超时，请稍后重试或缩小任务范围。详细错误已保留在调试面板中。'
+      : 'The request timed out. Retry in a moment or narrow the task scope. Full details are available in the debug panel.';
+  }
+
+  return truncateErrorMessage(normalized, 220);
 }
 
 function summarizeToolResult(toolName: string, response: ToolInvokeResponse) {
@@ -1348,6 +1713,7 @@ export default function App() {
   const [debugDetailTab, setDebugDetailTab] = useState<DebugDetailTab>('request');
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('openai');
   const [themeMode, setThemeMode] = useState<ThemeMode>('dark');
+  const [toolPanelExpanded, setToolPanelExpanded] = useState(true);
   const [openAiConfigText, setOpenAiConfigText] = useState(defaultOpenAiConfigJson);
   const [showOpenAiJsonEditor, setShowOpenAiJsonEditor] = useState(false);
   const [locale, setLocale] = useState<Locale>('zh-CN');
@@ -1395,10 +1761,14 @@ export default function App() {
         const nativeState = await loadNativeWorkspaceState();
 
         if (!cancelled) {
-          setState((current) => ({
-            ...current,
-            ...hydratePersistedWorkspaceState(nativeState.workspaceState),
-          }));
+          setState((current) => {
+            const hydrated = hydratePersistedWorkspaceState(nativeState.workspaceState);
+            return {
+              ...current,
+              ...hydrated,
+              providerConnections: mergeCustomProviderState(current.providerConnections, hydrated.customProviders),
+            };
+          });
           setLocale(nativeState.locale === 'en' ? 'en' : 'zh-CN');
           setThemeMode(nativeState.themeMode === 'rust-light' ? 'rust-light' : 'dark');
           setWorkspaceStateSyncEnabled(true);
@@ -1448,7 +1818,10 @@ export default function App() {
         if (!cancelled) {
           setState((current) => ({
             ...current,
-            providerConnections: mergeProviderConnections(nativeConfig.connections),
+            providerConnections: mergeCustomProviderState(
+              mergeProviderConnections(nativeConfig.connections),
+              current.providerConnections.filter(isCustomProviderConnection),
+            ),
           }));
           setOpenAiConfigText(nativeConfig.openAiConfigText ?? defaultOpenAiConfigJson);
           setProviderConfigSyncEnabled(true);
@@ -1501,24 +1874,42 @@ export default function App() {
     return () => window.cancelAnimationFrame(frame);
   }, [state.transcript]);
 
-  const activeProvider = useMemo(
-    () => providerProfiles.find((provider) => provider.id === state.selectedProvider) ?? providerProfiles[0],
-    [state.selectedProvider],
-  );
   const activeConnection = useMemo(
     () => state.providerConnections.find((connection) => connection.providerId === state.selectedProvider),
     [state.providerConnections, state.selectedProvider],
   );
+  const activeProvider = useMemo(() => {
+    const builtInProfile = providerProfiles.find((provider) => provider.id === state.selectedProvider);
+    if (builtInProfile) {
+      return builtInProfile;
+    }
+
+    return {
+      id: state.selectedProvider,
+      name: getProviderDisplayName(state.selectedProvider, state.providerConnections),
+      tone: 'OpenAI-compatible custom provider.',
+      strength: 'User-defined routing and model catalog.',
+      latency: 'Variable',
+      activeModel: activeConnection?.selectedModel ?? '',
+    };
+  }, [activeConnection?.selectedModel, state.providerConnections, state.selectedProvider]);
   const visibleProviders = useMemo(
     () =>
-      providerProfiles.filter((provider) => {
-        const connection = state.providerConnections.find((item) => item.providerId === provider.id);
-        if (!connection) {
-          return false;
-        }
+      state.providerConnections
+        .filter((connection) => {
+          if (isCustomProviderConnection(connection)) {
+            return Boolean(connection.displayName?.trim() && connection.selectedModel.trim());
+          }
 
-        return Boolean(connection.apiKey.trim() || connection.endpoint.trim() !== defaultState.providerConnections.find((item) => item.providerId === provider.id)?.endpoint);
-      }),
+          return Boolean(
+            connection.apiKey.trim()
+            || connection.endpoint.trim() !== defaultState.providerConnections.find((item) => item.providerId === connection.providerId)?.endpoint,
+          );
+        })
+        .map((connection) => ({
+          id: connection.providerId,
+          name: getProviderDisplayName(connection.providerId, state.providerConnections),
+        })),
     [state.providerConnections],
   );
   const parsedOpenAiConfig = useMemo(() => {
@@ -1529,20 +1920,40 @@ export default function App() {
     }
   }, [openAiConfigText]);
   const effectiveProviderPresets = useMemo<Record<string, ProviderModelPreset[]>>(
-    () => ({
-      ...providerModelPresets,
-      openai:
-        parsedOpenAiConfig?.models.map((model): ProviderModelPreset => ({
-          id: model.id,
-          name: model.name,
-          contextLimit: model.contextLimit,
-          outputLimit: model.outputLimit,
-          variants: model.variants as ModelVariant[],
-        })) ?? providerModelPresets.openai,
-    }),
-    [parsedOpenAiConfig],
+    () => {
+      const nextPresets: Record<string, ProviderModelPreset[]> = {
+        ...providerModelPresets,
+        openai:
+          parsedOpenAiConfig?.models.map((model): ProviderModelPreset => ({
+            id: model.id,
+            name: model.name,
+            contextLimit: model.contextLimit,
+            outputLimit: model.outputLimit,
+            variants: model.variants as ModelVariant[],
+          })) ?? providerModelPresets.openai,
+      };
+
+      for (const connection of state.providerConnections) {
+        if (isCustomProviderConnection(connection)) {
+          nextPresets[connection.providerId] = connection.customModels?.length
+            ? connection.customModels
+            : DEFAULT_CUSTOM_PROVIDER_MODELS;
+        }
+      }
+
+      return nextPresets;
+    },
+    [parsedOpenAiConfig, state.providerConnections],
   );
   const orderedDebugRequests = useMemo(() => state.debugRequests.slice().reverse(), [state.debugRequests]);
+  const conversationEntries = useMemo(
+    () => state.transcript.filter((entry) => entry.role !== 'tool'),
+    [state.transcript],
+  );
+  const recentToolEntries = useMemo(
+    () => state.transcript.filter((entry) => entry.role === 'tool').slice(-10).reverse(),
+    [state.transcript],
+  );
   const selectedDebugRequest = useMemo(
     () => orderedDebugRequests.find((entry) => entry.id === selectedDebugRequestId) ?? orderedDebugRequests[0] ?? null,
     [orderedDebugRequests, selectedDebugRequestId],
@@ -1580,6 +1991,13 @@ export default function App() {
     setState((current) => ({
       ...current,
       transcript: [...current.transcript, createEntry(role, title, body, detail)],
+    }));
+  }
+
+  function appendPlanTranscript(title: string, body: string, planSteps: PlanStep[], detail?: string) {
+    setState((current) => ({
+      ...current,
+      transcript: [...current.transcript, createEntry('assistant', title, body, detail, planSteps)],
     }));
   }
 
@@ -1646,7 +2064,7 @@ export default function App() {
   }
 
   function setProvider(providerId: ProviderId) {
-    const providerName = providerProfiles.find((item) => item.id === providerId)?.name ?? providerId;
+    const providerName = getProviderDisplayName(providerId, state.providerConnections);
 
     setState((current) => ({
       ...current,
@@ -1708,13 +2126,133 @@ export default function App() {
   }
 
   function setProviderConnected(providerId: ProviderId, connected: boolean) {
-    const providerName = providerProfiles.find((item) => item.id === providerId)?.name ?? providerId;
+    const providerName = getProviderDisplayName(providerId, state.providerConnections);
     updateProviderConnection(providerId, connected ? { connected: true, enabled: true } : { connected: false });
     appendTranscript(
       'system',
       connected ? text.connect : text.disconnect,
       connected ? text.providerConnected(providerName) : text.providerDisconnected(providerName),
     );
+  }
+
+  function addCustomProvider() {
+    const providerId = `custom-${crypto.randomUUID().slice(0, 8)}`;
+    const displayName = `${text.customProviders} ${state.providerConnections.filter(isCustomProviderConnection).length + 1}`;
+    const initialModels = DEFAULT_CUSTOM_PROVIDER_MODELS.map((model) => ({ ...model }));
+
+    setState((current) => ({
+      ...current,
+      selectedProvider: providerId,
+      providerConnections: [
+        ...current.providerConnections,
+        {
+          providerId,
+          adapterKind: 'openai',
+          displayName,
+          customModels: initialModels,
+          enabled: true,
+          connected: false,
+          endpoint: 'https://api.openai.com/v1',
+          apiKey: '',
+          selectedModel: initialModels[0].id,
+          selectedVariant: 'medium',
+          store: false,
+        },
+      ],
+    }));
+  }
+
+  function removeCustomProvider(providerId: ProviderId) {
+    setState((current) => {
+      const remainingConnections = current.providerConnections.filter((connection) => connection.providerId !== providerId);
+      const nextSelectedProvider =
+        current.selectedProvider === providerId ? remainingConnections[0]?.providerId ?? defaultState.selectedProvider : current.selectedProvider;
+
+      return {
+        ...current,
+        selectedProvider: nextSelectedProvider,
+        providerConnections: remainingConnections,
+      };
+    });
+  }
+
+  function updateCustomModel(
+    providerId: ProviderId,
+    modelId: string,
+    patch: Partial<ProviderModelPreset>,
+  ) {
+    setState((current) => ({
+      ...current,
+      providerConnections: current.providerConnections.map((connection) => {
+        if (connection.providerId !== providerId) {
+          return connection;
+        }
+
+        const currentModels = connection.customModels?.length ? connection.customModels : DEFAULT_CUSTOM_PROVIDER_MODELS;
+        const nextModels = currentModels.map((model) =>
+          model.id === modelId
+            ? {
+                ...model,
+                ...patch,
+              }
+            : model,
+        );
+
+        const nextSelectedModel = nextModels.some((model) => model.id === connection.selectedModel)
+          ? connection.selectedModel
+          : nextModels[0]?.id ?? '';
+
+        return {
+          ...connection,
+          customModels: nextModels,
+          selectedModel: nextSelectedModel,
+        };
+      }),
+    }));
+  }
+
+  function addCustomModel(providerId: ProviderId) {
+    const modelId = `model-${crypto.randomUUID().slice(0, 6)}`;
+    setState((current) => ({
+      ...current,
+      providerConnections: current.providerConnections.map((connection) =>
+        connection.providerId === providerId
+          ? {
+              ...connection,
+              customModels: [
+                ...(connection.customModels ?? DEFAULT_CUSTOM_PROVIDER_MODELS),
+                {
+                  id: modelId,
+                  name: 'Custom model',
+                  contextLimit: 128000,
+                  outputLimit: 32000,
+                  variants: ['low', 'medium', 'high', 'xhigh'],
+                },
+              ],
+            }
+          : connection,
+      ),
+    }));
+  }
+
+  function removeCustomModel(providerId: ProviderId, modelId: string) {
+    setState((current) => ({
+      ...current,
+      providerConnections: current.providerConnections.map((connection) => {
+        if (connection.providerId !== providerId) {
+          return connection;
+        }
+
+        const nextModels = (connection.customModels ?? []).filter((model) => model.id !== modelId);
+        const nextSelectedModel = connection.selectedModel === modelId ? nextModels[0]?.id ?? '' : connection.selectedModel;
+
+        return {
+          ...connection,
+          customModels: nextModels,
+          selectedModel: nextSelectedModel,
+        };
+      }),
+    }));
   }
 
   function toggleTool(toolId: string) {
@@ -1780,6 +2318,7 @@ export default function App() {
       inputChars: preparedRequest.inputChars,
       outputChars: 0,
       requestJson: preparedRequest.requestJson,
+      traceText: `[start] ${startedAt}\n`,
     };
 
     setSelectedDebugRequestId(entry.id);
@@ -1800,6 +2339,21 @@ export default function App() {
           ? {
               ...entry,
               outputChars: entry.outputChars + chunk.length,
+              responseText: `${entry.responseText ?? ''}${chunk}`,
+            }
+          : entry,
+      ),
+    }));
+  }
+
+  function appendDebugTrace(requestId: string, traceLine: string) {
+    setState((current) => ({
+      ...current,
+      debugRequests: current.debugRequests.map((entry) =>
+        entry.requestId === requestId
+          ? {
+              ...entry,
+              traceText: `${entry.traceText ?? ''}${traceLine}\n`,
             }
           : entry,
       ),
@@ -1830,6 +2384,41 @@ export default function App() {
           ? {
               ...entry,
               rawResponseText,
+              traceText: `${entry.traceText ?? ''}[raw]\n${rawResponseText}\n`,
+            }
+          : entry,
+      ),
+    }));
+  }
+
+  function setDebugRequestResponseText(requestId: string, responseText: string) {
+    setState((current) => ({
+      ...current,
+      debugRequests: current.debugRequests.map((entry) =>
+        entry.requestId === requestId
+          ? {
+              ...entry,
+              responseText,
+            }
+          : entry,
+      ),
+    }));
+  }
+
+  function setDebugRequestUsage(requestId: string, usage?: TokenUsage) {
+    if (!usage) {
+      return;
+    }
+
+    const usageTrace = `[usage] in=${usage.promptTokens ?? '—'} out=${usage.completionTokens ?? '—'} total=${usage.totalTokens ?? '—'} reasoning=${usage.reasoningTokens ?? '—'}`;
+    setState((current) => ({
+      ...current,
+      debugRequests: current.debugRequests.map((entry) =>
+        entry.requestId === requestId
+          ? {
+              ...entry,
+              traceText: `${entry.traceText ?? ''}${usageTrace}\n`,
+              usage,
             }
           : entry,
       ),
@@ -2123,17 +2712,17 @@ export default function App() {
     }
   }
 
-  function buildLocalModelRequest(
-    preparedRequest: PreparedProviderRequest,
-    providerConnection: ProviderConnection,
-  ): LocalModelRequest {
-    return {
-      providerId: preparedRequest.providerId,
-      baseUrl: providerConnection.endpoint,
-      apiKey: providerConnection.apiKey,
-      payload: preparedRequest.body,
-    };
-  }
+function buildLocalModelRequest(
+  preparedRequest: PreparedProviderRequest,
+  providerConnection: ProviderConnection,
+): LocalModelRequest {
+  return {
+    providerId: getProviderAdapterKind(providerConnection),
+    baseUrl: providerConnection.endpoint,
+    apiKey: providerConnection.apiKey,
+    payload: preparedRequest.body,
+  };
+}
 
   async function invokeLocalModelCompletion(
     preparedRequest: PreparedProviderRequest,
@@ -2203,6 +2792,7 @@ export default function App() {
           continue;
         }
 
+        appendDebugTrace(requestId, `data: ${truncateErrorMessage(payload, 800)}`);
         const event = JSON.parse(payload) as LocalModelStreamEvent;
         if (event.eventType === 'chunk' && event.text) {
           appendResponseChunk(requestId, event.text);
@@ -2213,6 +2803,9 @@ export default function App() {
           if (event.rawResponseText) {
             setDebugRequestRawResponse(requestId, event.rawResponseText);
           }
+          if (event.usage) {
+            setDebugRequestUsage(requestId, event.usage);
+          }
           return;
         }
 
@@ -2220,6 +2813,40 @@ export default function App() {
           throw new Error(event.message ?? 'Local model stream failed.');
         }
       }
+    }
+  }
+
+  async function generateAssistantPlan(
+    providerConnection: ProviderConnection,
+    prompt: string,
+    startedAt: string,
+    parentRequestId: string,
+  ) {
+    const preparedRequest = buildPlanRequest(state.selectedProvider, providerConnection, state.transcript, prompt);
+    const requestId = `${parentRequestId}-plan`;
+    const transport: TransportKind = isTauriRuntime() ? 'tauri' : 'browser';
+    startDebugRequest(requestId, preparedRequest, transport, startedAt);
+
+    try {
+      const result = await invokeLocalModelCompletion(preparedRequest, providerConnection);
+      if (result.rawResponseText) {
+        setDebugRequestRawResponse(requestId, result.rawResponseText);
+      }
+      if (result.content) {
+        setDebugRequestResponseText(requestId, result.content);
+      }
+      if (result.usage) {
+        setDebugRequestUsage(requestId, result.usage);
+      }
+
+      completeDebugRequest(requestId, result.content?.length ?? 0);
+      const plan = parseGeneratedPlan(result.content ?? '');
+      if (plan?.usePlan && plan.steps.length) {
+        appendPlanTranscript(text.generatedPlan, `${plan.steps.length} steps`, plan.steps, plan.rawText);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      markDebugRequestError(requestId, message);
     }
   }
 
@@ -2251,17 +2878,28 @@ export default function App() {
       try {
         result = await invokeLocalModelCompletion(preparedRequest, providerConnection);
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        markDebugRequestError(requestId, message);
-        throw new Error(message);
-      }
+      const message = error instanceof Error ? error.message : String(error);
+      appendDebugTrace(requestId, `[error] ${truncateErrorMessage(message, 400)}`);
+      markDebugRequestError(requestId, message);
+      throw new Error(message);
+    }
 
-      if (result.rawResponseText) {
-        setDebugRequestRawResponse(requestId, result.rawResponseText);
-      }
+    if (result.rawResponseText) {
+      setDebugRequestRawResponse(requestId, result.rawResponseText);
+    }
+    if (result.usage) {
+      setDebugRequestUsage(requestId, result.usage);
+    }
 
-      const assistantText = result.content ?? '';
-      const toolCalls = normalizeOpenAiToolCalls(Array.isArray(result.toolCalls) ? result.toolCalls : []);
+    const assistantText = result.content ?? '';
+    if (assistantText) {
+      setDebugRequestResponseText(requestId, assistantText);
+    }
+    appendDebugTrace(
+      requestId,
+      `[result] text=${assistantText.length} toolCalls=${Array.isArray(result.toolCalls) ? result.toolCalls.length : 0}`,
+    );
+    const toolCalls = normalizeOpenAiToolCalls(Array.isArray(result.toolCalls) ? result.toolCalls : []);
       completeDebugRequest(requestId, assistantText.length);
 
       if (!toolCalls.length) {
@@ -2315,6 +2953,7 @@ export default function App() {
           continue;
         }
 
+        appendDebugTrace(toolCallId.startsWith('tool-call-') ? requestId : requestId, `[tool] ${toolName} ${JSON.stringify(parsedArgs)}`);
         toolResponse = await invokeToolServer(toolName, parsedArgs);
         {
           const toolResult = summarizeToolResult(toolName, toolResponse);
@@ -2329,33 +2968,9 @@ export default function App() {
       }
     }
 
-    const finalMessages = [
-      ...messages,
-      {
-        role: 'user',
-        content:
-          'Stop using tools. Summarize exactly what you changed, list the key files or commands involved, mention any remaining gap briefly, and provide the final answer now.',
-      },
-    ];
-    const finalRequest = buildOpenAiFollowUpRequest(
-      state.selectedProvider,
-      providerConnection,
-      finalMessages,
-      [],
+    throw new Error(
+      `Exceeded ${MAX_TOOL_ROUNDS} tool rounds before completion. The model kept exploring without producing a final implementation. Try a narrower request or continue from the current workspace state.`,
     );
-    const finalRequestId = `${placeholderId}-tool-round-final`;
-    startDebugRequest(finalRequestId, finalRequest, transport, startedAt);
-
-    try {
-      replaceTranscriptBody(placeholderId, '');
-      await streamLocalModelService(finalRequest, providerConnection, placeholderId);
-      completeDebugRequest(finalRequestId);
-      return;
-    } catch (error) {
-      const message = truncateErrorMessage(error instanceof Error ? error.message : String(error));
-      markDebugRequestError(finalRequestId, message);
-      throw new Error(`Exceeded ${MAX_TOOL_ROUNDS} tool rounds without a final answer. ${message}`);
-    }
   }
 
   async function streamBrowserOpenAi(request: PreparedProviderRequest, requestId: string) {
@@ -2400,6 +3015,7 @@ export default function App() {
           continue;
         }
 
+        appendDebugTrace(requestId, `data: ${truncateErrorMessage(payload, 800)}`);
         const parsed = JSON.parse(payload) as {
           choices?: Array<{
             delta?: { content?: string | Array<{ text?: string }> };
@@ -2464,6 +3080,7 @@ export default function App() {
           continue;
         }
 
+        appendDebugTrace(requestId, `data: ${truncateErrorMessage(payload, 800)}`);
         const parsed = JSON.parse(payload) as { type?: string; delta?: { text?: string } };
         if (parsed.type === 'content_block_delta' && parsed.delta?.text) {
           appendResponseChunk(requestId, parsed.delta.text);
@@ -2523,7 +3140,7 @@ export default function App() {
     const prompt = draft.trim();
     const transport: TransportKind = isTauriRuntime() ? 'tauri' : 'browser';
     const useCodingToolLoop =
-      providerSupportsCodingTools(state.selectedProvider) && buildEnabledOpenAiTools(state.tools).length > 0;
+      providerSupportsCodingTools(providerConnection) && buildEnabledOpenAiTools(state.tools).length > 0;
     let preparedRequest: PreparedProviderRequest | null = null;
 
     if (!useCodingToolLoop) {
@@ -2563,6 +3180,8 @@ export default function App() {
     setDraft('');
 
     try {
+      await generateAssistantPlan(providerConnection, prompt, userEntry.timestamp, placeholderId);
+
       if (useCodingToolLoop) {
         await runOpenAiCodingAgentLoop(providerConnection, prompt, placeholderId, userEntry.timestamp);
         setStreaming(false);
@@ -2574,7 +3193,7 @@ export default function App() {
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      replaceTranscriptBody(placeholderId, `${text.requestFailed}: ${message}`);
+      replaceTranscriptBody(placeholderId, `${text.requestFailed}: ${summarizeUserFacingError(message, locale)}`);
       if (!useCodingToolLoop) {
         markDebugRequestError(placeholderId, `${text.requestFailed}: ${message}`);
       }
@@ -2628,45 +3247,95 @@ export default function App() {
       </aside>
 
       <main className="center-stage panel">
-        <section className="transcript" ref={transcriptRef}>
-          {state.transcript.map((entry) => (
-            <article key={entry.id} className={`chat-row ${entry.role}`}>
-              <div className={`chat-bubble ${entry.role}`}>
-                {(() => {
-                  const body = entry.body || (streaming && entry.title === text.streamingResponse ? '...' : '');
+        <div className="conversation-layout">
+          <section className="transcript" ref={transcriptRef}>
+            {conversationEntries.map((entry) => (
+              <article key={entry.id} className={`chat-row ${entry.role}`}>
+                <div className={`chat-bubble ${entry.role}`}>
+                  {(() => {
+                    const body = entry.body || (streaming && entry.title === text.streamingResponse ? '...' : '');
 
-                  return (
-                    <>
-                      {entry.role === 'system' || entry.role === 'tool' ? (
-                        <div className="transcript-meta">
-                          <span>{roleLabel(entry.role, locale)}</span>
-                          <time>{entry.timestamp}</time>
-                        </div>
-                      ) : null}
-                      <h3 className="chat-title">{entry.title}</h3>
-                      {entry.role === 'assistant' ? (
-                        <MarkdownContent content={body} />
-                      ) : entry.role === 'tool' && entry.detail ? (
-                        <details className="tool-call-card">
-                          <summary className="tool-call-summary">
-                            <span className="tool-call-summary-text">{body}</span>
-                            <span className="tool-call-summary-action">Details</span>
-                          </summary>
-                          {entry.detail ? <pre className="tool-call-detail">{entry.detail}</pre> : null}
-                        </details>
-                      ) : (
-                        <p className="chat-plain-text">{body}</p>
-                      )}
-                      {entry.role === 'user' || entry.role === 'assistant' ? (
-                        <time className="chat-hover-time">{entry.timestamp}</time>
-                      ) : null}
-                    </>
-                  );
-                })()}
+                    return (
+                      <>
+                        {entry.role === 'system' ? (
+                          <div className="transcript-meta">
+                            <span>{roleLabel(entry.role, locale)}</span>
+                            <time>{entry.timestamp}</time>
+                          </div>
+                        ) : null}
+                        <h3 className="chat-title">{entry.title}</h3>
+                        {entry.role === 'assistant' ? (
+                          entry.planSteps?.length ? (
+                            <details className="plan-card" open>
+                              <summary className="plan-summary">
+                                <span className="plan-summary-text">{entry.title}</span>
+                                <span className="tool-call-summary-action">Details</span>
+                              </summary>
+                              <div className="plan-body">
+                                {entry.planSteps.map((step) => (
+                                  <div key={step.id} className="plan-step-row">
+                                    <span className={`badge ${step.status === 'completed' ? 'live' : 'idle'}`}>{step.status}</span>
+                                    <span>{step.title}</span>
+                                  </div>
+                                ))}
+                              </div>
+                              {entry.detail ? <pre className="tool-call-detail">{entry.detail}</pre> : null}
+                            </details>
+                          ) : (
+                            <MarkdownContent content={body} />
+                          )
+                        ) : (
+                          <p className="chat-plain-text">{body}</p>
+                        )}
+                        {entry.role === 'user' || entry.role === 'assistant' ? (
+                          <time className="chat-hover-time">{entry.timestamp}</time>
+                        ) : null}
+                      </>
+                    );
+                  })()}
+                </div>
+              </article>
+            ))}
+          </section>
+
+          <aside className={`tool-activity-panel ${toolPanelExpanded ? 'expanded' : 'collapsed'}`}>
+            <div className="tool-activity-header">
+              <div className="tool-activity-title">
+                <p className="eyebrow">{text.toolActivity}</p>
+                {toolPanelExpanded ? <p className="helper-text">{text.toolActivityHint}</p> : null}
               </div>
-            </article>
-          ))}
-        </section>
+              <button
+                className="tool-panel-toggle secondary-button"
+                onClick={() => setToolPanelExpanded(!toolPanelExpanded)}
+                type="button"
+                aria-label={toolPanelExpanded ? 'Collapse' : 'Expand'}
+              >
+                {toolPanelExpanded ? '收起' : '展开'}
+              </button>
+            </div>
+
+            {toolPanelExpanded ? (
+              <div className="tool-activity-list">
+                {recentToolEntries.length ? (
+                  recentToolEntries.map((entry) => (
+                    <details key={entry.id} className="tool-activity-card">
+                      <summary className="tool-activity-summary">
+                        <div className="tool-activity-copy">
+                          <strong>{entry.title}</strong>
+                          <p>{entry.body}</p>
+                        </div>
+                        <time>{entry.timestamp}</time>
+                      </summary>
+                      {entry.detail ? <pre className="tool-call-detail">{entry.detail}</pre> : null}
+                    </details>
+                  ))
+                ) : (
+                  <p className="helper-text tool-activity-empty">{text.noToolActivity}</p>
+                )}
+              </div>
+            ) : null}
+          </aside>
+        </div>
 
         <footer className="composer">
           <div className="composer-shell">
@@ -2681,6 +3350,24 @@ export default function App() {
               <div className="composer-main-footer">
                 <div className="composer-main-meta">
                   <div className="composer-toolbar composer-toolbar-inline">
+                    <label className="composer-provider-picker narrow-picker">
+                      <span>{text.chooseProvider}</span>
+                      <select
+                        className="composer-select"
+                        value={state.selectedProvider}
+                        onChange={(event) => setProvider(event.target.value as ProviderId)}
+                      >
+                        {visibleProviders.map((provider) => {
+                          const connection = state.providerConnections.find((item) => item.providerId === provider.id);
+                          return (
+                            <option key={provider.id} value={provider.id}>
+                              {provider.name}
+                              {connection?.connected ? '' : ' · offline'}
+                            </option>
+                          );
+                        })}
+                      </select>
+                    </label>
                     <label className="composer-provider-picker">
                       <span>{text.chooseModel}</span>
                       <select
@@ -2720,29 +3407,6 @@ export default function App() {
                 </div>
               </div>
             </div>
-
-            {visibleProviders.length > 1 ? (
-              <div className="composer-toolbar composer-toolbar-standalone">
-                <label className="composer-provider-picker">
-                  <span>{text.chooseProvider}</span>
-                  <select
-                    className="composer-select"
-                    value={state.selectedProvider}
-                    onChange={(event) => setProvider(event.target.value as ProviderId)}
-                  >
-                    {visibleProviders.map((provider) => {
-                      const connection = state.providerConnections.find((item) => item.providerId === provider.id);
-                      return (
-                        <option key={provider.id} value={provider.id}>
-                          {provider.name}
-                          {connection?.connected ? '' : ' · offline'}
-                        </option>
-                      );
-                    })}
-                  </select>
-                </label>
-              </div>
-            ) : null}
           </div>
         </footer>
       </main>
@@ -2797,8 +3461,7 @@ export default function App() {
                             : entry.status === 'error'
                               ? text.statusError
                               : text.statusPending;
-                        const providerName =
-                          providerProfiles.find((provider) => provider.id === entry.providerId)?.name ?? entry.providerId;
+                        const providerName = getProviderDisplayName(entry.providerId, state.providerConnections);
 
                         return (
                           <button
@@ -2839,6 +3502,9 @@ export default function App() {
                                 {text.outputChars}: {entry.outputChars}
                               </div>
                               <div className="limit-card debug-metric">
+                                {text.totalTokens}: {formatUsageMetric(entry.usage?.totalTokens)}
+                              </div>
+                              <div className="limit-card debug-metric">
                                 {text.durationLabel}: {entry.durationMs ? `${entry.durationMs} ms` : '—'}
                               </div>
                             </div>
@@ -2861,9 +3527,7 @@ export default function App() {
                   <section className="settings-card debug-payload-pane">
                     {selectedDebugRequest ? (
                       (() => {
-                        const providerName =
-                          providerProfiles.find((provider) => provider.id === selectedDebugRequest.providerId)?.name ??
-                          selectedDebugRequest.providerId;
+                        const providerName = getProviderDisplayName(selectedDebugRequest.providerId, state.providerConnections);
                         const statusLabel =
                           selectedDebugRequest.status === 'done'
                             ? text.statusDone
@@ -2904,6 +3568,24 @@ export default function App() {
                                 {text.outputChars}: {selectedDebugRequest.outputChars}
                               </div>
                               <div className="limit-card debug-metric">
+                                {text.inputTokens}: {formatUsageMetric(selectedDebugRequest.usage?.promptTokens)}
+                              </div>
+                              <div className="limit-card debug-metric">
+                                {text.outputTokens}: {formatUsageMetric(selectedDebugRequest.usage?.completionTokens)}
+                              </div>
+                              <div className="limit-card debug-metric">
+                                {text.totalTokens}: {formatUsageMetric(selectedDebugRequest.usage?.totalTokens)}
+                              </div>
+                              <div className="limit-card debug-metric">
+                                {text.reasoningTokens}: {formatUsageMetric(selectedDebugRequest.usage?.reasoningTokens)}
+                              </div>
+                              <div className="limit-card debug-metric">
+                                {text.cachedTokens}: {formatUsageMetric(selectedDebugRequest.usage?.cachedTokens)}
+                              </div>
+                              <div className="limit-card debug-metric">
+                                {text.cacheCreationTokens}: {formatUsageMetric(selectedDebugRequest.usage?.cacheCreationTokens)}
+                              </div>
+                              <div className="limit-card debug-metric">
                                 {text.durationLabel}: {selectedDebugRequest.durationMs ? `${selectedDebugRequest.durationMs} ms` : '—'}
                               </div>
                             </div>
@@ -2928,19 +3610,29 @@ export default function App() {
                                 {text.requestPayload}
                               </button>
                               <button
+                                className={`debug-detail-tab ${debugDetailTab === 'trace' ? 'active' : ''}`}
+                                onClick={() => setDebugDetailTab('trace')}
+                                role="tab"
+                                type="button"
+                              >
+                                {text.traceLog}
+                              </button>
+                              <button
                                 className={`debug-detail-tab ${debugDetailTab === 'response' ? 'active' : ''}`}
                                 onClick={() => setDebugDetailTab('response')}
                                 role="tab"
                                 type="button"
                               >
-                                {text.rawResponse}
+                                {text.responseText}
                               </button>
                             </div>
 
                             <pre className="debug-request-pre debug-payload-pre">
                               {debugDetailTab === 'request'
                                 ? selectedDebugRequest.requestJson
-                                : selectedDebugRequest.rawResponseText || text.noRawResponse}
+                                : debugDetailTab === 'trace'
+                                  ? selectedDebugRequest.traceText || text.noTrace
+                                  : selectedDebugRequest.responseText || selectedDebugRequest.rawResponseText || text.noResponseText}
                             </pre>
                           </>
                         );
@@ -3030,134 +3722,340 @@ export default function App() {
                     if (!connection) return null;
                     const presets = effectiveProviderPresets.openai ?? [];
                     const selectedPreset = getProviderPreset(effectiveProviderPresets, 'openai', connection.selectedModel);
+                    const customProviders = state.providerConnections.filter(isCustomProviderConnection);
 
                     return (
-                      <div className="settings-card">
-                        <div className="section-head compact">
-                          <strong>{text.openaiConfig}</strong>
-                          <div className="provider-badges">
-                            <span className={`badge ${connection.enabled ? 'live' : 'idle'}`}>
-                              {connection.enabled ? text.enabled : text.disabled}
-                            </span>
-                            <span className={`badge ${connection.connected ? 'live' : 'idle'}`}>
-                              {connection.connected ? text.connected : text.disconnected}
-                            </span>
+                      <>
+                        <div className="settings-card">
+                          <div className="section-head compact">
+                            <strong>{text.openaiConfig}</strong>
+                            <div className="provider-badges">
+                              <span className={`badge ${connection.enabled ? 'live' : 'idle'}`}>
+                                {connection.enabled ? text.enabled : text.disabled}
+                              </span>
+                              <span className={`badge ${connection.connected ? 'live' : 'idle'}`}>
+                                {connection.connected ? text.connected : text.disconnected}
+                              </span>
+                            </div>
                           </div>
-                        </div>
 
-                        <div className="settings-actions openai-config-actions">
-                          <button className="secondary-button" onClick={() => setShowOpenAiJsonEditor((current) => !current)} type="button">
-                            {text.editJson}
-                          </button>
-                          <button className="secondary-button" onClick={applyOpenAiJsonConfig} type="button">
-                            {text.saveJson}
-                          </button>
-                        </div>
+                          <div className="settings-actions openai-config-actions">
+                            <button className="secondary-button" onClick={() => setShowOpenAiJsonEditor((current) => !current)} type="button">
+                              {text.editJson}
+                            </button>
+                            <button className="secondary-button" onClick={applyOpenAiJsonConfig} type="button">
+                              {text.saveJson}
+                            </button>
+                          </div>
 
-                        {showOpenAiJsonEditor ? (
+                          {showOpenAiJsonEditor ? (
+                            <div className="config-editor-shell">
+                              <label className="field-label config-editor-label">
+                                <span>{text.rawConfig}</span>
+                                <span>{text.rawConfigHint}</span>
+                              </label>
+                              <textarea
+                                className="config-editor"
+                                value={openAiConfigText}
+                                onChange={(event) => setOpenAiConfigText(event.target.value)}
+                              />
+                            </div>
+                          ) : null}
+
                           <label className="field-label">
-                            <span>{text.rawConfig}</span>
-                            <textarea
-                              className="config-editor"
-                              value={openAiConfigText}
-                              onChange={(event) => setOpenAiConfigText(event.target.value)}
+                            <span>{text.endpoint}</span>
+                            <input
+                              className="text-input"
+                              value={connection.endpoint}
+                              onChange={(event) => updateProviderConnection('openai', { endpoint: event.target.value })}
                             />
                           </label>
-                        ) : null}
 
-                        <label className="field-label">
-                          <span>{text.endpoint}</span>
-                          <input
-                            className="text-input"
-                            value={connection.endpoint}
-                            onChange={(event) => updateProviderConnection('openai', { endpoint: event.target.value })}
-                          />
-                        </label>
-
-                        <label className="field-label">
-                          <span>{text.apiKey}</span>
-                          <input
-                            className="text-input"
-                            type="password"
-                            placeholder={maskApiKey(connection.apiKey)}
-                            value={connection.apiKey}
-                            onChange={(event) => updateProviderConnection('openai', { apiKey: event.target.value })}
-                          />
-                        </label>
-
-                        <label className="field-label">
-                          <span>{text.model}</span>
-                          <select
-                            className="text-input themed-select"
-                            value={connection.selectedModel}
-                            onChange={(event) => setProviderModel('openai', event.target.value)}
-                          >
-                            {presets.map((preset: ProviderModelPreset) => (
-                              <option key={preset.id} value={preset.id}>
-                                {preset.name}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-
-                        <div className="field-grid">
                           <label className="field-label">
-                            <span>{text.variant}</span>
+                            <span>{text.apiKey}</span>
+                            <input
+                              className="text-input"
+                              type="password"
+                              placeholder={maskApiKey(connection.apiKey)}
+                              value={connection.apiKey}
+                              onChange={(event) => updateProviderConnection('openai', { apiKey: event.target.value })}
+                            />
+                          </label>
+
+                          <label className="field-label">
+                            <span>{text.model}</span>
                             <select
                               className="text-input themed-select"
-                              value={connection.selectedVariant}
-                              onChange={(event) => setProviderVariant('openai', event.target.value as ModelVariant)}
+                              value={connection.selectedModel}
+                              onChange={(event) => setProviderModel('openai', event.target.value)}
                             >
-                              {(selectedPreset?.variants ?? ['medium']).map((variant) => (
-                                <option key={variant} value={variant}>
-                                  {variant}
+                              {presets.map((preset: ProviderModelPreset) => (
+                                <option key={preset.id} value={preset.id}>
+                                  {preset.name}
                                 </option>
                               ))}
                             </select>
                           </label>
 
-                          <label className="field-label">
-                            <span>{text.limits}</span>
-                            <div className="limit-card">
-                              {selectedPreset
-                                ? `${selectedPreset.contextLimit.toLocaleString()} / ${selectedPreset.outputLimit.toLocaleString()}`
-                                : '—'}
-                            </div>
-                          </label>
+                          <div className="field-grid">
+                            <label className="field-label">
+                              <span>{text.variant}</span>
+                              <select
+                                className="text-input themed-select"
+                                value={connection.selectedVariant}
+                                onChange={(event) => setProviderVariant('openai', event.target.value as ModelVariant)}
+                              >
+                                {(selectedPreset?.variants ?? ['medium']).map((variant) => (
+                                  <option key={variant} value={variant}>
+                                    {variant}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+
+                            <label className="field-label">
+                              <span>{text.limits}</span>
+                              <div className="limit-card">
+                                {selectedPreset
+                                  ? `${selectedPreset.contextLimit.toLocaleString()} / ${selectedPreset.outputLimit.toLocaleString()}`
+                                  : '—'}
+                              </div>
+                            </label>
+                          </div>
+
+                          <div className="settings-actions top-gap">
+                            <label className="inline-toggle">
+                              <input
+                                checked={connection.store}
+                                onChange={() => updateProviderConnection('openai', { store: !connection.store })}
+                                type="checkbox"
+                              />
+                              <span>{text.store}</span>
+                            </label>
+                            <span className="helper-text inline-value">
+                              {text.activeModelLabel}: {connection.selectedModel}
+                            </span>
+                          </div>
+
+                          <div className="settings-actions">
+                            <label className="inline-toggle">
+                              <input
+                                checked={connection.enabled}
+                                onChange={() => toggleProviderEnabled('openai')}
+                                type="checkbox"
+                              />
+                              <span>{connection.enabled ? text.enabled : text.disabled}</span>
+                            </label>
+                            <button
+                              className={`secondary-button ${connection.connected ? 'danger' : ''}`}
+                              onClick={() => setProviderConnected('openai', !connection.connected)}
+                              type="button"
+                            >
+                              {connection.connected ? text.disconnect : text.connect}
+                            </button>
+                          </div>
                         </div>
 
-                        <div className="settings-actions top-gap">
-                          <label className="inline-toggle">
-                            <input
-                              checked={connection.store}
-                              onChange={() => updateProviderConnection('openai', { store: !connection.store })}
-                              type="checkbox"
-                            />
-                            <span>{text.store}</span>
-                          </label>
-                          <span className="helper-text inline-value">
-                            {text.activeModelLabel}: {connection.selectedModel}
-                          </span>
-                        </div>
+                        <div className="settings-card">
+                          <div className="section-head compact">
+                            <strong>{text.customProviders}</strong>
+                            <button className="secondary-button" onClick={addCustomProvider} type="button">
+                              {text.addCustomProvider}
+                            </button>
+                          </div>
+                          <p className="helper-text settings-intro">{text.customProviderHint}</p>
 
-                        <div className="settings-actions">
-                          <label className="inline-toggle">
-                            <input
-                              checked={connection.enabled}
-                              onChange={() => toggleProviderEnabled('openai')}
-                              type="checkbox"
-                            />
-                            <span>{connection.enabled ? text.enabled : text.disabled}</span>
-                          </label>
-                          <button
-                            className={`secondary-button ${connection.connected ? 'danger' : ''}`}
-                            onClick={() => setProviderConnected('openai', !connection.connected)}
-                            type="button"
-                          >
-                            {connection.connected ? text.disconnect : text.connect}
-                          </button>
+                          <div className="custom-provider-list">
+                            {customProviders.map((customProvider) => {
+                              const customPresets = effectiveProviderPresets[customProvider.providerId] ?? [];
+                              const customSelectedPreset = getProviderPreset(
+                                effectiveProviderPresets,
+                                customProvider.providerId,
+                                customProvider.selectedModel,
+                              );
+
+                              return (
+                                <div key={customProvider.providerId} className="custom-provider-card">
+                                  <div className="section-head compact">
+                                    <strong>{getProviderDisplayName(customProvider.providerId, state.providerConnections)}</strong>
+                                    <button
+                                      className="secondary-button danger"
+                                      onClick={() => removeCustomProvider(customProvider.providerId)}
+                                      type="button"
+                                    >
+                                      {text.removeCustomProvider}
+                                    </button>
+                                  </div>
+
+                                  <label className="field-label">
+                                    <span>{text.providerName}</span>
+                                    <input
+                                      className="text-input"
+                                      value={customProvider.displayName ?? ''}
+                                      onChange={(event) => updateProviderConnection(customProvider.providerId, { displayName: event.target.value })}
+                                    />
+                                  </label>
+
+                                  <label className="field-label">
+                                    <span>{text.endpoint}</span>
+                                    <input
+                                      className="text-input"
+                                      value={customProvider.endpoint}
+                                      onChange={(event) => updateProviderConnection(customProvider.providerId, { endpoint: event.target.value })}
+                                    />
+                                  </label>
+
+                                  <label className="field-label">
+                                    <span>{text.apiKey}</span>
+                                    <input
+                                      className="text-input"
+                                      type="password"
+                                      placeholder={maskApiKey(customProvider.apiKey)}
+                                      value={customProvider.apiKey}
+                                      onChange={(event) => updateProviderConnection(customProvider.providerId, { apiKey: event.target.value })}
+                                    />
+                                  </label>
+
+                                  <label className="field-label">
+                                    <span>{text.model}</span>
+                                    <select
+                                      className="text-input themed-select"
+                                      value={customProvider.selectedModel}
+                                      onChange={(event) => setProviderModel(customProvider.providerId, event.target.value)}
+                                    >
+                                      {customPresets.map((preset) => (
+                                        <option key={preset.id} value={preset.id}>
+                                          {preset.name}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </label>
+
+                                  <div className="field-grid">
+                                    <label className="field-label">
+                                      <span>{text.variant}</span>
+                                      <select
+                                        className="text-input themed-select"
+                                        value={customProvider.selectedVariant}
+                                        onChange={(event) => setProviderVariant(customProvider.providerId, event.target.value as ModelVariant)}
+                                      >
+                                        {(customSelectedPreset?.variants ?? ['medium']).map((variant) => (
+                                          <option key={variant} value={variant}>
+                                            {variant}
+                                          </option>
+                                        ))}
+                                      </select>
+                                    </label>
+
+                                    <label className="field-label">
+                                      <span>{text.limits}</span>
+                                      <div className="limit-card">
+                                        {customSelectedPreset
+                                          ? `${customSelectedPreset.contextLimit.toLocaleString()} / ${customSelectedPreset.outputLimit.toLocaleString()}`
+                                          : '—'}
+                                      </div>
+                                    </label>
+                                  </div>
+
+                                  <div className="settings-actions top-gap">
+                                    <label className="inline-toggle">
+                                      <input
+                                        checked={customProvider.store}
+                                        onChange={() => updateProviderConnection(customProvider.providerId, { store: !customProvider.store })}
+                                        type="checkbox"
+                                      />
+                                      <span>{text.store}</span>
+                                    </label>
+                                    <span className="helper-text inline-value">
+                                      {text.activeModelLabel}: {customProvider.selectedModel}
+                                    </span>
+                                  </div>
+
+                                  <div className="settings-actions">
+                                    <label className="inline-toggle">
+                                      <input
+                                        checked={customProvider.enabled}
+                                        onChange={() => toggleProviderEnabled(customProvider.providerId)}
+                                        type="checkbox"
+                                      />
+                                      <span>{customProvider.enabled ? text.enabled : text.disabled}</span>
+                                    </label>
+                                    <button
+                                      className={`secondary-button ${customProvider.connected ? 'danger' : ''}`}
+                                      onClick={() => setProviderConnected(customProvider.providerId, !customProvider.connected)}
+                                      type="button"
+                                    >
+                                      {customProvider.connected ? text.disconnect : text.connect}
+                                    </button>
+                                  </div>
+
+                                  <div className="custom-model-list">
+                                    {(customProvider.customModels ?? []).map((model) => (
+                                      <div key={model.id} className="custom-model-card">
+                                        <div className="field-grid">
+                                          <label className="field-label">
+                                            <span>{text.modelName}</span>
+                                            <input
+                                              className="text-input"
+                                              value={model.name}
+                                              onChange={(event) => updateCustomModel(customProvider.providerId, model.id, { name: event.target.value })}
+                                            />
+                                          </label>
+                                          <label className="field-label">
+                                            <span>{text.modelIdLabel}</span>
+                                            <input
+                                              className="text-input"
+                                              value={model.id}
+                                              onChange={(event) => updateCustomModel(customProvider.providerId, model.id, { id: event.target.value })}
+                                            />
+                                          </label>
+                                        </div>
+
+                                        <div className="field-grid">
+                                          <label className="field-label">
+                                            <span>{text.contextLimit}</span>
+                                            <input
+                                              className="text-input"
+                                              type="number"
+                                              value={model.contextLimit}
+                                              onChange={(event) => updateCustomModel(customProvider.providerId, model.id, { contextLimit: Number(event.target.value) || 0 })}
+                                            />
+                                          </label>
+                                          <label className="field-label">
+                                            <span>{text.outputLimit}</span>
+                                            <input
+                                              className="text-input"
+                                              type="number"
+                                              value={model.outputLimit}
+                                              onChange={(event) => updateCustomModel(customProvider.providerId, model.id, { outputLimit: Number(event.target.value) || 0 })}
+                                            />
+                                          </label>
+                                        </div>
+
+                                        <div className="settings-actions openai-config-actions">
+                                          <button
+                                            className="secondary-button danger"
+                                            onClick={() => removeCustomModel(customProvider.providerId, model.id)}
+                                            type="button"
+                                          >
+                                            {text.removeModel}
+                                          </button>
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+
+                                  <div className="settings-actions openai-config-actions">
+                                    <button className="secondary-button" onClick={() => addCustomModel(customProvider.providerId)} type="button">
+                                      {text.addModel}
+                                    </button>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
                         </div>
-                      </div>
+                      </>
                     );
                   })() : settingsSection === 'claude' ? (() => {
                     const connection = state.providerConnections.find((item) => item.providerId === 'anthropic');
